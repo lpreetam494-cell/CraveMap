@@ -1,0 +1,21 @@
+# --- CraveMap Sovereign Ignore List ---
+
+# Secrets (DO NOT COMMIT)
+.env
+.env.local
+*.key
+*.pem
+
+# Dependencies
+node_modules/
+dist/
+build/
+.cache/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Project Specific
+food_memory.json
+*.log

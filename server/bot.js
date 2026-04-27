@@ -23,6 +23,8 @@ bot.on('text', async (ctx) => {
         if (response.data.success) {
             const entry = response.data.entry;
             ctx.reply(`📍 Saved to Sovereign Bucket!\n\nName: ${entry.name}\nCuisine: ${entry.cuisine}\nArea: ${entry.area}\n\nCheck your dashboard for behavioral insights.`);
+        } else {
+            ctx.reply(`🤔 ${response.data.message}`);
         }
     } catch (error) {
         console.error("❌ Bot Error:", error.message);

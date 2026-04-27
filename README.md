@@ -10,9 +10,12 @@ CraveMap is a "Sovereign" food intelligence system. Unlike centralized platforms
 
 ## 🧠 Multi-Agent Architecture
 Powered by **OpenClaw Orchestration**:
-1.  **Social Hunter**: Extracts structured metadata from raw Telegram/WhatsApp chats and social links.
-2.  **Taste Alchemist**: Synthesizes craving cycles and historical preferences to suggest the perfect meal.
+1.  **Social Hunter**: Extracts structured metadata from raw Telegram/WhatsApp chats. *Upgraded with RapidAPI for direct Instagram scraping, protected by Simulation Fallbacks.*
+2.  **Taste Alchemist**: Synthesizes craving cycles and historical preferences to suggest the perfect meal. *Upgraded with Tavily Search API to handle Cold-Start queries.*
 3.  **Lifestyle Operator**: Monitors environmental context (Weather/Time) and executes proactive actions (Group Polls/Alerts).
+
+## 🛡️ The Hackathon "Safety Net"
+To guarantee a flawless demo, the system is designed defensively. If the RapidAPI or Tavily keys are missing, or if stage Wi-Fi drops, the agents seamlessly transition into "Simulation Mode," utilizing rich, hardcoded fallback data without breaking the Telegram UX.
 
 ---
 
@@ -24,6 +27,8 @@ Create/Update the `.env` file in the `/server` directory:
 GROQ_API_KEY=your_groq_key
 TELEGRAM_BOT_TOKEN=your_bot_token
 OPENWEATHER_API_KEY=your_weather_key
+TAVILY_API_KEY=your_tavily_key
+RAPIDAPI_KEY=your_rapidapi_key
 ```
 
 ### 2. Install Dependencies

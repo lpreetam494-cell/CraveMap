@@ -73,10 +73,10 @@ app.post('/api/save', async (req, res) => {
 });
 
 // 3. Get Recommendation (Taste Alchemist Trigger)
-app.post('/api/recommend', (req, res) => {
+app.post('/api/recommend', async (req, res) => {
     const { context } = req.body;
     const memory = readMemory();
-    const result = getRecommendation(memory, context);
+    const result = await getRecommendation(memory, context);
     res.json(result);
 });
 

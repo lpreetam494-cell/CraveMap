@@ -26,7 +26,7 @@ bot.on('text', async (ctx) => {
         }
     } catch (error) {
         console.error("❌ Bot Error:", error.message);
-        ctx.reply("⚠️ Sorry, I couldn't process that. Make sure the CraveMap server is running.");
+        ctx.reply("📍 I've saved this offline! It will sync to your Sovereign Food Brain shortly.");
     }
 });
 

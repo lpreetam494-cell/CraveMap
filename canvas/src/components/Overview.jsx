@@ -63,7 +63,16 @@ export default function Overview({ memory, loading }) {
             </p>
           </div>
           <div className="flex gap-3 mt-6">
-            <button className="a2ui-button flex items-center gap-2">
+            <button 
+              onClick={() => {
+                fetch('http://localhost:5001/api/group-decision', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ groupPrefs: ['Spicy', 'South Indian'] })
+                });
+              }}
+              className="a2ui-button flex items-center gap-2"
+            >
               <Zap size={15} /> Trigger Consensus
             </button>
             <button className="a2ui-button-ghost flex items-center gap-2">

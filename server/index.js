@@ -126,7 +126,7 @@ app.post('/api/think', async (req, res) => {
     res.json({ success: true, triggers });
 });
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5001;
 http.listen(PORT, () => {
     console.log(`CraveMap Brain running on port ${PORT}`);
 });

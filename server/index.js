@@ -53,6 +53,12 @@ app.post('/api/save', async (req, res) => {
     
     const extracted = await extractRestaurantData(text);
     
+    // DATA INTEGRITY VALIDATION
+    if (!extracted || !extracted.name || extracted.name === "Unknown") {
+        emitThought('Social Hunter', 'VALIDATION_FAILED', 'No actionable restaurant data found in input.');
+        return res.json({ success: false, message: "I couldn't find a specific restaurant name or location in that post! Can you send me the name or a Google Maps link instead?" });
+    }
+    
     emitThought('Social Hunter', 'EXTRACTION', `Metadata extracted: ${extracted.name}`, extracted);
     
     const memory = readMemory();
@@ -73,10 +79,10 @@ app.post('/api/save', async (req, res) => {
 });
 
 // 3. Get Recommendation (Taste Alchemist Trigger)
-app.post('/api/recommend', (req, res) => {
+app.post('/api/recommend', async (req, res) => {
     const { context } = req.body;
     const memory = readMemory();
-    const result = getRecommendation(memory, context);
+    const result = await getRecommendation(memory, context);
     res.json(result);
 });
 

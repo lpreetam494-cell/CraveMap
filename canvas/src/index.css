@@ -1,0 +1,80 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  body {
+    @apply bg-background text-textMain antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+  ::selection {
+    @apply bg-primary text-white;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-borderLight rounded-full;
+  }
+}
+
+@layer components {
+  /* A2UI Card — the core building block */
+  .a2ui-card {
+    @apply bg-surface rounded-2xl border border-borderLight/40 p-6;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.03);
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .a2ui-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.06), 0 12px 32px rgba(0,0,0,0.06);
+    transform: translateY(-2px);
+  }
+
+  /* A2UI Button — primary action */
+  .a2ui-button {
+    @apply bg-primary text-white px-5 py-2.5 rounded-xl font-semibold text-sm;
+    transition: all 0.2s ease;
+  }
+  .a2ui-button:hover {
+    @apply bg-blue-600;
+    transform: scale(1.02);
+  }
+  .a2ui-button:active {
+    transform: scale(0.98);
+  }
+
+  /* A2UI Ghost Button */
+  .a2ui-button-ghost {
+    @apply bg-white border border-borderLight text-textMain px-5 py-2.5 rounded-xl font-semibold text-sm;
+    transition: all 0.2s ease;
+  }
+  .a2ui-button-ghost:hover {
+    @apply bg-gray-50 border-gray-300;
+  }
+
+  /* A2UI Badge */
+  .a2ui-badge {
+    @apply px-3 py-1 rounded-lg text-xs font-bold tracking-wide;
+  }
+
+  /* A2UI Stat Card */
+  .a2ui-stat {
+    @apply flex flex-col gap-1;
+  }
+  .a2ui-stat-value {
+    @apply text-3xl font-extrabold tracking-tight text-textMain;
+  }
+  .a2ui-stat-label {
+    @apply text-xs font-medium text-textSub uppercase tracking-widest;
+  }
+}

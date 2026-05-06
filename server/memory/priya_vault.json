@@ -1,0 +1,61 @@
+{
+  "restaurants": [
+    {
+      "id": "201",
+      "name": "Tropika Brewing Co",
+      "cuisine": "Continental, Asian",
+      "area": "Marathahalli",
+      "budget": 1200,
+      "vibe": "tropical vibe, brewery, lively, rooftop",
+      "meal_type": "dinner",
+      "saved_at": "2026-05-04",
+      "visited": true,
+      "rating": 5
+    },
+    {
+      "id": "202",
+      "name": "Biergarten",
+      "cuisine": "Continental, European",
+      "area": "Koramangala",
+      "budget": 1500,
+      "vibe": "open air, brewery, upscale",
+      "meal_type": "dinner",
+      "saved_at": "2026-05-03",
+      "visited": false,
+      "rating": null
+    },
+    {
+      "id": "203",
+      "name": "The Rameshwaram Cafe",
+      "cuisine": "South Indian",
+      "area": "Indiranagar",
+      "budget": 200,
+      "vibe": "casual, fast, crowded",
+      "meal_type": "breakfast",
+      "saved_at": "2026-05-01",
+      "visited": true,
+      "rating": 4
+    }
+  ],
+  "analytics": {
+    "weekly_spend": 3000
+  },
+  "craving_patterns": {
+    "indian": {
+      "last_satisfied": "2026-05-05T19:12:01.424Z",
+      "cooldown_days": 5
+    },
+    "biryani": {
+      "last_satisfied": "2026-05-05T19:12:01.424Z",
+      "cooldown_days": 5
+    },
+    "north indian": {
+      "last_satisfied": "2026-05-06T17:23:49.611Z",
+      "cooldown_days": 5
+    },
+    "punjabi": {
+      "last_satisfied": "2026-05-06T17:23:49.611Z",
+      "cooldown_days": 5
+    }
+  }
+}

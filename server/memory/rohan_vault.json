@@ -1,0 +1,61 @@
+{
+  "restaurants": [
+    {
+      "id": "101",
+      "name": "Meghana Foods",
+      "cuisine": "Indian, Biryani",
+      "area": "Koramangala",
+      "budget": 350,
+      "vibe": "casual, crowded",
+      "meal_type": "dinner",
+      "saved_at": "2026-05-01",
+      "visited": true,
+      "rating": 5
+    },
+    {
+      "id": "102",
+      "name": "Empire Restaurant",
+      "cuisine": "North Indian, Biryani",
+      "area": "Indiranagar",
+      "budget": 400,
+      "vibe": "late night, loud",
+      "meal_type": "late_night",
+      "saved_at": "2026-05-02",
+      "visited": true,
+      "rating": 4
+    },
+    {
+      "id": "103",
+      "name": "Amritsari Kulcha Land",
+      "cuisine": "North Indian, Punjabi",
+      "area": "J P Nagar",
+      "budget": 200,
+      "vibe": "authentic, casual",
+      "meal_type": "lunch",
+      "saved_at": "2026-05-05",
+      "visited": false,
+      "rating": null
+    }
+  ],
+  "analytics": {
+    "weekly_spend": 1200
+  },
+  "craving_patterns": {
+    "indian": {
+      "last_satisfied": "2026-05-05T19:12:01.423Z",
+      "cooldown_days": 5
+    },
+    "biryani": {
+      "last_satisfied": "2026-05-05T19:12:01.423Z",
+      "cooldown_days": 5
+    },
+    "north indian": {
+      "last_satisfied": "2026-05-06T17:23:49.610Z",
+      "cooldown_days": 5
+    },
+    "punjabi": {
+      "last_satisfied": "2026-05-06T17:23:49.610Z",
+      "cooldown_days": 5
+    }
+  }
+}

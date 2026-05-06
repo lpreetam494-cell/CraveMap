@@ -6,10 +6,19 @@ const cron = require('node-cron');
 const { evaluateAndTriggerAgency } = require('./skills/agency_daemon');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
+// In-memory session store for discovery data (bypass Telegram 64-byte limit)
+const discoverySessionStore = new Map();
+const makeDiscoveryKey = (spot) => {
+    const key = `d_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    discoverySessionStore.set(key, spot);
+    // Auto-expire after 30 minutes
+    setTimeout(() => discoverySessionStore.delete(key), 30 * 60 * 1000);
+    return key;
+};
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 const MEMORY_PATH = path.join(__dirname, 'memory', 'food_memory.json');
 
-console.log("🤖 Sovereign Bot: Initializing Phase 6 Agency...");
+console.log("🤖 Sovereign Bot: Initializing Phase 7 Discovery Agent...");
 
 // Utility to save chat ID
 const saveChatId = (ctx) => {
@@ -24,10 +33,73 @@ const saveChatId = (ctx) => {
     } catch (e) {}
 };
 
-bot.start((ctx) => {
+bot.start(async (ctx) => {
     saveChatId(ctx);
-    ctx.reply("Welcome to CraveMap Sovereign. Send me a Reel link to save it, or ask me a natural language query like 'Show me rooftop spots'.\n\nAvailable Commands:\n/consensus - Trigger group decision\n/export_vault - Download your data\n/wipe_memory - Nuclear wipe\n/privacy_mode - Toggle graph visibility\n/dev_trigger_agency - Test Proactive Nudges");
+    // Quick Start: detect empty vault and launch onboarding
+    try {
+        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+        const isEmpty = !memory.restaurants || memory.restaurants.length === 0;
+        if (isEmpty) {
+            return ctx.reply(
+                "👋 Welcome to *CraveMap Sovereign* — your private Food Brain!\n\n" +
+                "Your vault is empty. Let me help you get started with a quick discovery!\n\n" +
+                "Which vibe fits you best?",
+                {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('🍛 Street Food & Local Gems', 'qs_vibe_street')],
+                        [Markup.button.callback('🌃 Rooftop & Fine Dining', 'qs_vibe_rooftop')],
+                        [Markup.button.callback('🍺 Casual Breweries & Cafes', 'qs_vibe_casual')],
+                        [Markup.button.callback('🌱 Healthy & Clean Eating', 'qs_vibe_healthy')],
+                    ])
+                }
+            );
+        }
+    } catch (e) {}
+
+    ctx.reply(
+        "Welcome back to *CraveMap Sovereign!* 🧠\n\n" +
+        "Available Commands:\n" +
+        "/discover <area> — Scout new restaurants\n" +
+        "/consensus — Trigger group decision\n" +
+        "/export\_vault — Download your data\n" +
+        "/wipe\_memory — Nuclear wipe\n" +
+        "/privacy\_mode — Toggle graph visibility\n" +
+        "/dev\_trigger\_agency — Test Proactive Nudges",
+        { parse_mode: 'Markdown' }
+    );
 });
+
+// Quick Start Onboarding Callbacks
+const QUICK_START_VIBES = {
+    qs_vibe_street: { vibe: 'street food, local, casual, budget', tags: ['street food', 'local', 'casual'] },
+    qs_vibe_rooftop: { vibe: 'rooftop, fine dining, date night, premium', tags: ['rooftop', 'fine dining', 'date'] },
+    qs_vibe_casual: { vibe: 'brewery, cafe, casual, lively', tags: ['brewery', 'cafe', 'casual'] },
+    qs_vibe_healthy: { vibe: 'healthy, salad, clean eating, light', tags: ['healthy', 'salad', 'clean'] },
+};
+
+for (const [action, profile] of Object.entries(QUICK_START_VIBES)) {
+    bot.action(action, async (ctx) => {
+        ctx.answerCbQuery();
+        saveChatId(ctx);
+        // Seed the taste profile into the vault
+        try {
+            const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+            if (!memory.analytics) memory.analytics = {};
+            memory.analytics.seed_vibe = profile.vibe;
+            memory.analytics.seed_tags = profile.tags;
+            fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
+        } catch (e) {}
+        await ctx.reply(`✅ Got it! Running a *first discovery* in Bangalore based on your vibe...`, { parse_mode: 'Markdown' });
+        // Trigger a discovery immediately using seeded vibe
+        try {
+            const response = await axios.post('http://localhost:5001/api/discover', { area: 'Bangalore' });
+            await sendDiscoveryCards(ctx, response.data);
+        } catch (err) {
+            ctx.reply('❌ Discovery failed: ' + err.message);
+        }
+    });
+}
 
 // Start the Heartbeat Daemon (runs every hour)
 cron.schedule('0 * * * *', () => {
@@ -138,6 +210,102 @@ bot.command('privacy_mode', (ctx) => {
         }
     } catch (e) {
         ctx.reply("Failed to toggle privacy mode.");
+    }
+});
+
+// Phase 7: Discovery Command
+const sendDiscoveryCards = async (ctx, result) => {
+    if (!result.success || !result.discoveries || result.discoveries.length === 0) {
+        return ctx.reply(result.message || "No discoveries found. Try a different area!");
+    }
+
+    await ctx.reply(`🔭 *Top ${result.discoveries.length} New Discoveries* — Ranked by your Taste Profile:`, { parse_mode: 'Markdown' });
+
+    for (const [i, spot] of result.discoveries.entries()) {
+        const label = spot.isWildcard ? '🎲 Wildcard Pick' : `#${i + 1} Best Match`;
+        const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spot.name + ' ' + spot.area)}`;
+        const sessionKey = makeDiscoveryKey(spot); // store full spot data in memory
+
+        const card = `${label}\n📍 *${spot.name}*\n🥘 ${spot.cuisine || 'Mixed'} · ✨ ${spot.vibe || 'Local gem'}\n\n_${spot.reasoning}_`;
+
+        await ctx.replyWithMarkdown(card, Markup.inlineKeyboard([
+            [Markup.button.url('🗺️ Get Directions', mapsUrl)],
+            [Markup.button.callback('💾 Save to Vault', `sdsc_${sessionKey}`)],
+        ]));
+    }
+};
+
+bot.command('discover', async (ctx) => {
+    saveChatId(ctx);
+    const text = ctx.message.text.trim();
+    const area = text.replace('/discover', '').trim();
+
+    if (!area) {
+        return ctx.reply(
+            "📍 Share your location or type an area name:\n" +
+            "Example: `/discover Koramangala` or `/discover Indiranagar`",
+            {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.callback('Use Default (Bangalore)', 'discover_bangalore')]
+                ])
+            }
+        );
+    }
+
+    await ctx.reply(`🔭 Scouting *${area}*... Applying your Sovereign Filter...`, { parse_mode: 'Markdown' });
+    try {
+        const response = await axios.post('http://localhost:5001/api/discover', { area });
+        await sendDiscoveryCards(ctx, response.data);
+    } catch (err) {
+        ctx.reply('❌ Discovery failed: ' + err.message);
+    }
+});
+
+bot.action('discover_bangalore', async (ctx) => {
+    ctx.answerCbQuery();
+    saveChatId(ctx);
+    await ctx.reply('🔭 Scouting *Bangalore*...', { parse_mode: 'Markdown' });
+    try {
+        const response = await axios.post('http://localhost:5001/api/discover', { area: 'Bangalore' });
+        await sendDiscoveryCards(ctx, response.data);
+    } catch (err) {
+        ctx.reply('❌ Discovery failed: ' + err.message);
+    }
+});
+
+// Handle Telegram location share for GPS-precise discovery
+bot.on('location', async (ctx) => {
+    saveChatId(ctx);
+    const { latitude, longitude } = ctx.message.location;
+    await ctx.reply(`📡 Got your coordinates! Scouting nearby restaurants...`);
+    try {
+        const response = await axios.post('http://localhost:5001/api/discover', { area: 'Current Location', lat: latitude, lon: longitude });
+        await sendDiscoveryCards(ctx, response.data);
+    } catch (err) {
+        ctx.reply('❌ Discovery failed: ' + err.message);
+    }
+});
+
+// Save Discovery Feedback Loop (uses in-memory session store)
+bot.action(/sdsc_(.+)/, async (ctx) => {
+    ctx.answerCbQuery('Saving to your Vault...');
+    const sessionKey = `d_${ctx.match[1].replace('d_', '')}`;
+    const spot = discoverySessionStore.get(ctx.match[1]) || discoverySessionStore.get(sessionKey);
+
+    if (!spot) {
+        return ctx.reply('⚠️ Discovery session expired. Run /discover again and save immediately.');
+    }
+
+    try {
+        await axios.post('http://localhost:5001/api/save-discovery', { discovery: spot });
+        ctx.replyWithMarkdown(
+            `💾 *${spot.name}* saved to your Sovereign Vault!\n` +
+            `Tagged as \`discovery: true\` — your Taste Profile will adapt to this.`
+        );
+        discoverySessionStore.delete(ctx.match[1]); // clean up
+    } catch (e) {
+        ctx.reply('❌ Failed to save discovery: ' + e.message);
     }
 });
 

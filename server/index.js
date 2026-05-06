@@ -7,7 +7,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 // Agent Skills
 const { extractRestaurantData } = require('./skills/social_hunter');
-const { discoverRestaurants } = require('./skills/discovery_agent');
+const { discoverRestaurants, runDiscoveryPipeline } = require('./skills/discovery_agent');
 const { getRecommendation } = require('./skills/taste_alchemist');
 const { findBestRestaurant } = require('./skills/group_consensus');
 const { getAmbientContext } = require('./skills/weather_service');
@@ -194,6 +194,61 @@ app.post('/api/search-vault', async (req, res) => {
     const result = await searchVault(query, memory);
     
     res.json(result);
+});
+
+// 6. Phase 7: Discovery Pipeline
+app.post('/api/discover', async (req, res) => {
+    const { area, lat, lon } = req.body;
+    if (!area && (!lat || !lon)) {
+        return res.status(400).json({ success: false, message: 'Provide an area name or lat/lon coordinates.' });
+    }
+
+    emitThought('Discovery Agent', 'SCOUT', `Starting discovery pipeline for "${area || `${lat},${lon}`}"...`);
+
+    const memory = readVault('food_memory.json');
+    const friendVaults = {
+        'Rohan': readVault('rohan_vault.json'),
+        'Priya': readVault('priya_vault.json')
+    };
+
+    const result = await runDiscoveryPipeline(area || 'Bangalore', memory, friendVaults, lat, lon);
+
+    if (result.success) {
+        emitThought('Discovery Agent', 'COMPLETED', `Sovereign Filter returned ${result.discoveries.length} top discoveries.`);
+    } else {
+        emitThought('Discovery Agent', 'NO_MATCH', result.message);
+    }
+
+    res.json(result);
+});
+
+// 7. Save a Discovery to Vault
+app.post('/api/save-discovery', (req, res) => {
+    const { discovery } = req.body;
+    if (!discovery || !discovery.name) {
+        return res.status(400).json({ success: false, message: 'Invalid discovery data.' });
+    }
+
+    const memory = readVault('food_memory.json');
+    const newEntry = {
+        id: (memory.restaurants.length + 1).toString(),
+        name: discovery.name,
+        cuisine: discovery.cuisine || null,
+        area: discovery.area || null,
+        vibe: discovery.vibe || null,
+        budget: null,
+        meal_type: null,
+        saved_at: new Date().toISOString().split('T')[0],
+        visited: false,
+        rating: null,
+        discovery: true,  // Phase 7 tag
+    };
+
+    memory.restaurants.push(newEntry);
+    writeMemory(memory);
+
+    emitThought('Memory Node', 'PERSISTENCE', `Discovery saved: ${discovery.name} (tagged discovery:true)`);
+    res.json({ success: true, entry: newEntry });
 });
 
 const PORT = process.env.PORT || 5001;

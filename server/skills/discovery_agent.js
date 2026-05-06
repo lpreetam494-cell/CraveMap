@@ -145,20 +145,17 @@ const scoutCandidates = async (area, lat = null, lon = null) => {
     console.log(`🔭 Scout: Querying Overpass at (${resolvedLat}, ${resolvedLon})...`);
 
     // SANITIZED query — no cuisine filters, no taste data, pure geographic radius
-    const query = `
-        [out:json][timeout:15];
-        (
-          nwr["amenity"="restaurant"](around:2500,${resolvedLat},${resolvedLon});
-          nwr["amenity"="cafe"](around:2500,${resolvedLat},${resolvedLon});
-        );
-        out center;
-    `;
+    // Using GET (Overpass rejects POST with 406 Not Acceptable)
+    const query = `[out:json][timeout:15];(nwr["amenity"="restaurant"](around:2500,${resolvedLat},${resolvedLon});nwr["amenity"="cafe"](around:2500,${resolvedLat},${resolvedLon}););out center;`;
 
     try {
-        const overpassRes = await axios.post(
-            'https://overpass-api.de/api/interpreter',
-            `data=${encodeURIComponent(query)}`,
-            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 20000 }
+        const overpassRes = await axios.get(
+            `https://overpass-api.de/api/interpreter`,
+            {
+                params: { data: query },
+                headers: { 'User-Agent': 'CraveMap-Sovereign-Agent/1.0' },
+                timeout: 20000
+            }
         );
 
         const elements = overpassRes.data?.elements || [];

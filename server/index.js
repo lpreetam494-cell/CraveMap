@@ -279,7 +279,7 @@ app.post('/api/verify-visit', async (req, res) => {
 
     emitThought('Vision Engine', 'VERIFY', 'Running Gemini vision on photo for restaurant identification...');
 
-    const pythonProcess = spawn('python', [
+    const pythonProcess = spawn('python3', [
         path.resolve(__dirname, 'python_services', 'visit_verifier.py')
     ]);
 

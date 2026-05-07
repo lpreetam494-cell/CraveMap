@@ -7,7 +7,7 @@ const path = require('path');
 
 const findBestRestaurant = (groupVaults, constraints) => {
     return new Promise((resolve, reject) => {
-        const pythonProcess = spawn('python', [path.resolve(__dirname, '..', 'python_services', 'social_brain.py')]);
+        const pythonProcess = spawn('python3', [path.resolve(__dirname, '..', 'python_services', 'social_brain.py')]);
 
         let stdoutData = '';
         let stderrData = '';

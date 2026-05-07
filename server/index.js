@@ -13,6 +13,8 @@ const { findBestRestaurant } = require('./skills/group_consensus');
 const { getAmbientContext } = require('./skills/weather_service');
 const { getProactiveTriggers } = require('./skills/lifestyle_operator');
 const { searchVault } = require('./skills/vault_search');
+const { applyMoodToConstraints } = require('./skills/mood_profiles');
+const { spawn } = require('child_process');
 
 const app = express();
 const http = require('http').createServer(app);
@@ -113,16 +115,32 @@ const writeVault = (filename, data) => {
 
 // 4. Resolve Group Conflict (Consensus Engine Trigger)
 app.post('/api/group-decision', async (req, res) => {
-    const { constraints } = req.body; // e.g. { vetoes: ["pizza"], max_budget: 1000 }
-    
-    emitThought('Taste Alchemist', 'SYNTHESIS', `Synthesizing preferences across Sovereign Vaults...`);
-    
+    let { constraints, mood } = req.body;
+
+    // Apply mood overrides if provided
+    if (mood) {
+        constraints = applyMoodToConstraints(constraints || {}, mood);
+        emitThought('Lifestyle Operator', 'MOOD', `Applying "${mood}" mood profile to consensus weights.`);
+    }
+
+    // Inject live negative_preferences from vault into session constraints
+    try {
+        const myVault = readVault('food_memory.json');
+        const recentNegPrefs = (myVault.negative_preferences || []).slice(-10);
+        if (recentNegPrefs.length > 0) {
+            constraints = { ...(constraints || {}), negative_preferences: recentNegPrefs };
+            emitThought('Memory Node', 'FEEDBACK', `Injecting ${recentNegPrefs.length} negative feedback signals into this session.`);
+        }
+    } catch (e) {}
+
+    emitThought('Taste Alchemist', 'SYNTHESIS', `Synthesizing preferences across Sovereign Vaults${mood ? ` [mood: ${mood}]` : ''}...`);
+
     const groupVaults = {
         "Akash": readVault('food_memory.json'),
         "Rohan": readVault('rohan_vault.json'),
         "Priya": readVault('priya_vault.json')
     };
-    
+
     try {
         const result = await findBestRestaurant(groupVaults, constraints);
         
@@ -249,6 +267,76 @@ app.post('/api/save-discovery', (req, res) => {
 
     emitThought('Memory Node', 'PERSISTENCE', `Discovery saved: ${discovery.name} (tagged discovery:true)`);
     res.json({ success: true, entry: newEntry });
+});
+
+// 8. Phase 8: Vision-Based Visit Verification
+const TMP_DIR = path.join(__dirname, 'tmp');
+if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+
+app.post('/api/verify-visit', async (req, res) => {
+    const { imagePath } = req.body;
+    if (!imagePath) return res.status(400).json({ success: false, error: 'imagePath required' });
+
+    emitThought('Vision Engine', 'VERIFY', 'Running Gemini vision on photo for restaurant identification...');
+
+    const pythonProcess = spawn('python', [
+        path.resolve(__dirname, 'python_services', 'visit_verifier.py')
+    ]);
+
+    let stdout = '';
+    let stderr = '';
+    pythonProcess.stdout.on('data', d => stdout += d.toString());
+    pythonProcess.stderr.on('data', d => stderr += d.toString());
+
+    pythonProcess.stdin.write(JSON.stringify({ image_path: imagePath }));
+    pythonProcess.stdin.end();
+
+    pythonProcess.on('close', (code) => {
+        // Always clean up temp file
+        try { if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath); } catch (e) {}
+
+        try {
+            const result = JSON.parse(stdout);
+
+            if (result.error === 'GEMINI_503') {
+                return res.json({ success: false, gemini_unavailable: true });
+            }
+
+            if (!result.success || !result.identified || result.confidence < 0.5) {
+                return res.json({ success: false, identified: false, confidence: result.confidence || 0 });
+            }
+
+            // Fuzzy match against vault
+            const memory = readVault('food_memory.json');
+            const identified = result.restaurant_name.toLowerCase();
+            const idx = memory.restaurants.findIndex(r => {
+                const name = (r.name || '').toLowerCase();
+                return name.includes(identified) || identified.includes(name) ||
+                       identified.split(' ').filter(w => w.length > 3).some(w => name.includes(w));
+            });
+
+            if (idx === -1) {
+                return res.json({ success: true, identified: true, restaurant_name: result.restaurant_name, matched_in_vault: false, confidence: result.confidence, cues: result.cues });
+            }
+
+            // Mark as visited + reset craving cycle
+            memory.restaurants[idx].visited = true;
+            const cuisine = memory.restaurants[idx].cuisine;
+            if (cuisine) {
+                const cuisines = cuisine.split(',').map(c => c.trim().toLowerCase());
+                if (!memory.craving_patterns) memory.craving_patterns = {};
+                cuisines.forEach(c => {
+                    memory.craving_patterns[c] = { last_satisfied: new Date().toISOString(), cooldown_days: 5 };
+                });
+            }
+            writeMemory(memory);
+            emitThought('Memory Node', 'PERSISTENCE', `Marked "${memory.restaurants[idx].name}" as visited via photo verification.`);
+
+            return res.json({ success: true, identified: true, matched_in_vault: true, restaurant: memory.restaurants[idx], confidence: result.confidence, cues: result.cues });
+        } catch (e) {
+            return res.status(500).json({ success: false, error: 'Failed to parse verifier output', raw: stdout });
+        }
+    });
 });
 
 const PORT = process.env.PORT || 5001;

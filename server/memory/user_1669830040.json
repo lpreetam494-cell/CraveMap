@@ -1,0 +1,26 @@
+{
+  "user_profile": {
+    "name": "AKASH",
+    "telegram_username": "ErenYeager160",
+    "telegram_id": 1669830040,
+    "onboarded_at": "2026-05-08T04:27:51.283Z",
+    "diet_type": "Non-Veg",
+    "favorite_cuisines": [
+      "Indian",
+      "Korean",
+      "Chinese"
+    ],
+    "spice_tolerance": "Mild",
+    "eating_style": "Explorer",
+    "onboarding_complete": true,
+    "persona_name": "The Global Spice Seeker"
+  },
+  "restaurants": [],
+  "craving_patterns": {},
+  "social_graph": {},
+  "visit_history": [],
+  "analytics": {
+    "stealth_mode": true
+  },
+  "negative_preferences": []
+}

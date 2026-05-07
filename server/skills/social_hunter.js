@@ -81,10 +81,27 @@ const extractRestaurantData = async (text) => {
         } catch (error) {
             const fullError = (error.message || "") + " " + (error.stderr || "") + " " + (error.stdout || "");
             console.error("❌ Ingestion Engine Error:", fullError, "\n-> Falling back to Groq processing");
-            if (fullError.toLowerCase().includes("login required") || fullError.toLowerCase().includes("rate-limit") || fullError.toLowerCase().includes("cookie")) {
+            
+            // Instagram processing failed - provide helpful alternatives
+            if (text.includes("instagram.com")) {
+                console.log("📸 Instagram link received but video extraction blocked");
                 return {
                     name: "Unknown",
-                    error_msg: "Instagram's privacy shields blocked me from downloading the video. 🛡️\n\nTo enable Reel processing, export your Instagram cookies to a 'cookies.txt' file in the 'server/python_services' folder.\n\nAlternatively, just send me the name of the place or a Google Maps link!"
+                    error_msg: `🛡️ Instagram Reel Processing Blocked\n\n**Alternatives:**\n` +
+                              `📸 Upload a photo of the dish or restaurant\n` +
+                              `📝 Send me the restaurant name directly\n` +
+                              `🗺️ Share a Google Maps link`
+                };
+            }
+            
+            if (fullError.toLowerCase().includes("login required") || fullError.toLowerCase().includes("rate-limit") || fullError.toLowerCase().includes("cookie")) {
+                console.log("⚡ Instagram auth blocked. No fallback available.");
+                return {
+                    name: "Unknown",
+                    error_msg: `🛡️ Instagram Reel Processing Blocked\n\n**Alternatives:**\n` +
+                              `📸 Upload a photo of the dish or restaurant\n` +
+                              `📝 Send me the restaurant name directly\n` +
+                              `🗺️ Share a Google Maps link`
                 };
             }
             

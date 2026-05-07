@@ -401,6 +401,41 @@ const buildSilentReasoning = (candidate, isWildcard) => {
 const runDiscoveryPipeline = async (area, memory, friendVaults = {}, lat = null, lon = null) => {
     console.log(`🚀 Discovery Pipeline: Starting for "${area}"...`);
 
+    // PART 3: STEALTH MODE ENFORCEMENT
+    // Block external API calls if stealth mode is active
+    if (memory.analytics?.stealth_mode) {
+        console.log('🕶️ STEALTH MODE ACTIVE: Blocking external API calls');
+        
+        // Offer offline-only discovery from existing vault
+        const existingSpots = memory.restaurants || [];
+        if (existingSpots.length === 0) {
+            return {
+                success: false,
+                message: `🕶️ *Stealth Mode Active* - No offline discovery possible.\n\nYour vault is empty. To discover restaurants, either:\n1. Disable Stealth Mode (/stealth_mode)\n2. Add restaurants manually to your vault`
+            };
+        }
+
+        // Return random 3 from existing vault as offline suggestions
+        const shuffled = [...existingSpots].sort(() => Math.random() - 0.5);
+        const offline = shuffled.slice(0, 3).map((spot, i) => ({
+            id: `offline_${i}`,
+            name: spot.name,
+            cuisine: spot.cuisine,
+            vibe: spot.vibe,
+            area: spot.area,
+            isWildcard: i === 2,  // Last one is wildcard
+            reasoning: `📴 From your existing vault (offline). Stealth Mode blocks external discovery.`,
+            discovery: false
+        }));
+
+        return {
+            success: true,
+            discoveries: offline,
+            tasteVector: {},
+            stealth_mode_notice: '🕶️ Operating in Stealth Mode - No external APIs used'
+        };
+    }
+
     const tasteVector = buildTasteVector(memory, friendVaults);
 
     const rawCandidates = await scoutCandidates(area, lat, lon);

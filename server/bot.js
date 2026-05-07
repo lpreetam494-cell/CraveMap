@@ -338,18 +338,58 @@ bot.command('wipe_memory', (ctx) => {
 
 bot.command('privacy_mode', (ctx) => {
     try {
-        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
-        if (!memory.analytics) memory.analytics = {};
-        memory.analytics.privacy_mode = !memory.analytics.privacy_mode;
-        fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
+        const userId = ctx.from.id;
+        const vault = readUserVault(userId);
+        if (!vault.analytics) vault.analytics = {};
+        vault.analytics.privacy_mode = !vault.analytics.privacy_mode;
+        writeUserVault(userId, vault);
         
-        if (memory.analytics.privacy_mode) {
+        if (vault.analytics.privacy_mode) {
             ctx.reply("🕵️‍♂️ Privacy Mode: ON. Your data will be ignored in the next Group Consensus calculation.");
         } else {
             ctx.reply("🌍 Privacy Mode: OFF. Your tastes will influence the Social Taste Graph.");
         }
     } catch (e) {
         ctx.reply("Failed to toggle privacy mode.");
+    }
+});
+
+// PART 3: SOVEREIGN LOCAL-FIRST ENFORCEMENT
+// Stealth Mode: Block all external API calls (Discovery, Web Search, Video Ingestion)
+bot.command('stealth_mode', (ctx) => {
+    try {
+        const userId = ctx.from.id;
+        const vault = readUserVault(userId);
+        if (!vault.analytics) vault.analytics = {};
+        
+        vault.analytics.stealth_mode = !vault.analytics.stealth_mode;
+        writeUserVault(userId, vault);
+        
+        if (vault.analytics.stealth_mode) {
+            ctx.reply(
+                `🕶️ *STEALTH MODE: ACTIVE* 🕶️\n\n` +
+                `✅ *Blocked:*\n` +
+                `• Discovery API calls (Nominatim, Google Places)\n` +
+                `• Web search (Tavily)\n` +
+                `• Social media ingestion (Instagram/TikTok)\n` +
+                `• Weather API calls\n\n` +
+                `✅ *Still Available:*\n` +
+                `• Personal vault queries\n` +
+                `• Craving cycle tracking (local)\n` +
+                `• Group consensus (peer-only)\n\n` +
+                `🔒 Your Sovereign Food Brain operates 100% offline.\n` +
+                `All computation happens on your machine.`,
+                { parse_mode: 'Markdown' }
+            );
+        } else {
+            ctx.reply(
+                `🌍 *STEALTH MODE: DEACTIVATED* 🌍\n\n` +
+                `External APIs now accessible for discovery and enrichment.`,
+                { parse_mode: 'Markdown' }
+            );
+        }
+    } catch (e) {
+        ctx.reply("Failed to toggle stealth mode.");
     }
 });
 
@@ -465,7 +505,7 @@ bot.on('text', async (ctx) => {
     if (text.includes("http") || text.includes("instagram") || text.includes("tiktok")) {
         ctx.reply("⚡ Agent Social Hunter is processing your media link...");
         try {
-            const response = await axios.post('http://localhost:5001/api/save', { text });
+            const response = await axios.post('http://localhost:5001/api/save', { text }, { timeout: 10000 });
             if (response.data.success) {
                 if (response.data.isDiscovery) {
                     ctx.reply(response.data.message);
@@ -474,10 +514,23 @@ bot.on('text', async (ctx) => {
                     ctx.reply(`📍 Saved to Sovereign Bucket!\n\nName: ${entry.name}\nCuisine: ${entry.cuisine}\nArea: ${entry.area}\n\nCheck your dashboard for behavioral insights.`);
                 }
             } else {
-                ctx.reply(`🤔 ${response.data.message}`);
+                // Show actual error from API (Instagram auth, Gemini limits, etc.)
+                const errorMsg = response.data.message || response.data.error_msg || "Unable to process this link.";
+                ctx.reply(`⚠️ ${errorMsg}`);
             }
         } catch (error) {
-            ctx.reply("📍 I've saved this offline! It will sync to your Sovereign Food Brain shortly.");
+            console.error("❌ Instagram Processing Error:", error.message);
+            // More informative error messages
+            if (error.code === 'ECONNREFUSED') {
+                ctx.reply("❌ Backend API is unreachable. Please try again in a moment.");
+            } else if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
+                ctx.reply("⏱️ Video processing timed out. Try:\n1. A shorter video/reel\n2. Just the restaurant name\n3. A Google Maps link");
+            } else if (error.response?.status === 400) {
+                // Backend returned specific error (Instagram auth, Gemini limit, etc)
+                ctx.reply(error.response.data?.message || "🛡️ Can't process this video. Try sending the restaurant name instead!");
+            } else {
+                ctx.reply("🛡️ Video processing failed.\n\n**Alternatives:**\n📝 Send restaurant name\n🗺️ Share Google Maps link\n📸 Upload a food photo");
+            }
         }
     } else {
         // Natural Language Search

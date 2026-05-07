@@ -5,7 +5,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 
-const findBestRestaurant = (groupVaults, constraints) => {
+const findBestRestaurant = (payloadObj) => {
     return new Promise((resolve, reject) => {
         const pythonProcess = spawn('python3', [path.resolve(__dirname, '..', 'python_services', 'social_brain.py')]);
 
@@ -36,10 +36,7 @@ const findBestRestaurant = (groupVaults, constraints) => {
             }
         });
 
-        const payload = JSON.stringify({
-            vaults: groupVaults,
-            constraints: constraints || {}
-        });
+        const payload = JSON.stringify(payloadObj);
 
         pythonProcess.stdin.write(payload);
         pythonProcess.stdin.end();

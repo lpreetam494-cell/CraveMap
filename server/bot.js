@@ -6,6 +6,9 @@ const cron = require('node-cron');
 const { evaluateAndTriggerAgency } = require('./skills/agency_daemon');
 const { resolveMood, MOOD_PROFILES } = require('./skills/mood_profiles');
 const { recordNegativePreference } = require('./skills/reweight_engine');
+const onboarding = require('./skills/onboarding');
+const lobby_manager = require('./skills/lobby_manager');
+const { readUserVault, writeUserVault } = require('./skills/vault_router');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const TMP_DIR = path.join(__dirname, 'tmp');
@@ -38,74 +41,141 @@ const saveChatId = (ctx) => {
     } catch (e) {}
 };
 
+bot.use((ctx, next) => {
+    console.log("➡️ Received Update:", ctx.updateType, ctx.message?.text);
+    return next();
+});
+
 bot.start(async (ctx) => {
     saveChatId(ctx);
-    // Quick Start: detect empty vault and launch onboarding
+    const userId = ctx.from.id;
     try {
-        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
-        const isEmpty = !memory.restaurants || memory.restaurants.length === 0;
-        if (isEmpty) {
-            return ctx.reply(
-                "👋 Welcome to *CraveMap Sovereign* — your private Food Brain!\n\n" +
-                "Your vault is empty. Let me help you get started with a quick discovery!\n\n" +
-                "Which vibe fits you best?",
-                {
-                    parse_mode: 'Markdown',
-                    ...Markup.inlineKeyboard([
-                        [Markup.button.callback('🍛 Street Food & Local Gems', 'qs_vibe_street')],
-                        [Markup.button.callback('🌃 Rooftop & Fine Dining', 'qs_vibe_rooftop')],
-                        [Markup.button.callback('🍺 Casual Breweries & Cafes', 'qs_vibe_casual')],
-                        [Markup.button.callback('🌱 Healthy & Clean Eating', 'qs_vibe_healthy')],
-                    ])
-                }
-            );
+        const vault = readUserVault(userId);
+        if (!vault.user_profile || !vault.user_profile.onboarding_complete) {
+            return onboarding.startOnboarding(ctx);
         }
     } catch (e) {}
 
     ctx.reply(
         "Welcome back to *CraveMap Sovereign* 🧠\n\n" +
         "*Commands:*\n" +
+        "/whoami — View your Food Persona\n" +
         "/discover Koramangala — Scout new restaurants\n" +
-        "/consensus celebrations — Group decision with mood\n" +
+        "/consensus — Group decision lobby\n" +
         "/export\\_vault — Download your data\n" +
-        "/wipe\\_memory — Nuclear wipe\n" +
-        "/privacy\\_mode — Toggle graph visibility\n\n" +
-        "*Moods:* celebrations, quick bite, date night, comfort, healthy\n\n" +
+        "/wipe\\_memory — Nuclear wipe\n\n" +
         "Send a photo of your meal and I will verify the visit automatically.",
         { parse_mode: 'Markdown' }
     );
 });
 
-// Quick Start Onboarding Callbacks
-const QUICK_START_VIBES = {
-    qs_vibe_street: { vibe: 'street food, local, casual, budget', tags: ['street food', 'local', 'casual'] },
-    qs_vibe_rooftop: { vibe: 'rooftop, fine dining, date night, premium', tags: ['rooftop', 'fine dining', 'date'] },
-    qs_vibe_casual: { vibe: 'brewery, cafe, casual, lively', tags: ['brewery', 'cafe', 'casual'] },
-    qs_vibe_healthy: { vibe: 'healthy, salad, clean eating, light', tags: ['healthy', 'salad', 'clean'] },
-};
+// --- NEW ONBOARDING ACTIONS ---
+bot.action(/ob_diet_(veg|nonveg|vegan|egg)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const mapping = { veg: 'Vegetarian', nonveg: 'Non-Veg', vegan: 'Vegan', egg: 'Eggetarian' };
+        await onboarding.handleDietType(ctx, mapping[ctx.match[1]]);
+    } catch (e) { console.error(e); }
+});
 
-for (const [action, profile] of Object.entries(QUICK_START_VIBES)) {
-    bot.action(action, async (ctx) => {
-        ctx.answerCbQuery();
-        saveChatId(ctx);
-        // Seed the taste profile into the vault
-        try {
-            const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
-            if (!memory.analytics) memory.analytics = {};
-            memory.analytics.seed_vibe = profile.vibe;
-            memory.analytics.seed_tags = profile.tags;
-            fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
-        } catch (e) {}
-        await ctx.reply(`✅ Got it! Running a *first discovery* in Bangalore based on your vibe...`, { parse_mode: 'Markdown' });
-        // Trigger a discovery immediately using seeded vibe
-        try {
-            const response = await axios.post('http://localhost:5001/api/discover', { area: 'Bangalore' });
-            await sendDiscoveryCards(ctx, response.data);
-        } catch (err) {
-            ctx.reply('❌ Discovery failed: ' + err.message);
+bot.action(/ob_cuisine_done/, async (ctx) => {
+    try {
+        await onboarding.handleCuisineDone(ctx);
+    } catch (e) {
+        if (e.message && e.message.includes('not modified')) return;
+        console.error(e);
+    }
+});
+
+bot.action(/ob_cuisine_(.+)/, async (ctx) => {
+    try {
+        await onboarding.handleCuisineToggle(ctx, ctx.match[1]);
+    } catch (e) {
+        if (e.message && e.message.includes('not modified')) return;
+        console.error(e);
+    }
+});
+
+bot.action(/ob_spice_(.+)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const mapping = { extreme: 'Extreme', medium: 'Medium', mild: 'Mild' };
+        await onboarding.handleSpice(ctx, mapping[ctx.match[1]]);
+    } catch (e) { console.error(e); }
+});
+
+bot.action(/ob_style_(.+)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const mapping = { explorer: 'Explorer', loyalist: 'Loyalist' };
+        await onboarding.handleStyle(ctx, mapping[ctx.match[1]]);
+    } catch (e) { console.error(e); }
+});
+
+bot.command('whoami', async (ctx) => {
+    try {
+        const userId = ctx.from.id;
+        const vault = readUserVault(userId);
+        if (!vault.user_profile || !vault.user_profile.onboarding_complete) {
+            return ctx.reply("You haven't completed your Food DNA onboarding yet. Run /start to begin.");
         }
-    });
-}
+        
+        const Groq = require("groq-sdk");
+        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+        
+        const completion = await groq.chat.completions.create({
+            messages: [{
+                role: "system",
+                content: "You are a creative persona generator. Based on the user's food profile, generate a fun, creative 2-4 word title (e.g. 'The Indiranagar Spice-King', 'The Cozy Cafe Collector'). Return ONLY the title string."
+            }, {
+                role: "user",
+                content: JSON.stringify(vault.user_profile)
+            }],
+            model: "llama-3.3-70b-versatile"
+        });
+        
+        const persona = completion.choices[0].message.content.replace(/["']/g, '');
+        vault.user_profile.persona_name = persona;
+        writeUserVault(userId, vault);
+
+        const p = vault.user_profile;
+        const msg = `👑 *Your Food Persona*\n\n` +
+                    `*${persona}*\n\n` +
+                    `🍽️ *Diet:* ${p.diet_type}\n` +
+                    `🌍 *Cuisines:* ${(p.favorite_cuisines || []).join(', ')}\n` +
+                    `🌶️ *Spice:* ${p.spice_tolerance}\n` +
+                    `🧭 *Style:* ${p.eating_style}\n\n` +
+                    `_Your Sovereign Vault holds ${(vault.restaurants || []).length} saved spots._`;
+
+        ctx.reply(msg, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([[Markup.button.callback('⚠️ Reset Profile', 'reset_profile')]])
+        });
+        
+    } catch (e) {
+        ctx.reply("❌ Failed to synthesize persona: " + e.message);
+    }
+});
+
+bot.action('reset_profile', async (ctx) => {
+    ctx.answerCbQuery();
+    const userId = ctx.from.id;
+    ctx.reply("Profile reset triggered. To fully wipe your data, run /wipe_memory.");
+    try {
+        const vault = readUserVault(userId);
+        delete vault.user_profile;
+        writeUserVault(userId, vault);
+    } catch (e) {}
+});
+
+bot.on('new_chat_members', async (ctx) => {
+    try {
+        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+        if (memory.user_profile && memory.user_profile.persona_name) {
+            ctx.reply(`🤝 *A ${memory.user_profile.persona_name} has joined the table.*\n\nSocial Taste Graph updated! We'll factor in their preferences for future group decisions.`, { parse_mode: 'Markdown' });
+        }
+    } catch (e) {}
+});
 
 // Start the Heartbeat Daemon (runs every hour)
 cron.schedule('0 * * * *', () => {
@@ -115,52 +185,25 @@ cron.schedule('0 * * * *', () => {
 // In-memory store for veto context (spotId → spot data)
 const vetoSessionStore = new Map();
 
-// Component 1: The Consensus Decision Card (Phase 8: Mood-aware)
+// Component 1: The Consensus Decision Card (Phase 10: Lobby Manager)
 bot.command('consensus', async (ctx) => {
     saveChatId(ctx);
-    const text = ctx.message.text.trim();
-    const args = text.replace('/consensus', '').trim();
-    const moodKey = resolveMood(args);
+    await lobby_manager.startLobby(ctx);
+});
 
-    const moodLabel = moodKey ? MOOD_PROFILES[moodKey]?.label : null;
-    const moodDisplay = moodLabel ? ` \[${moodLabel}\]` : '';
-
-    await ctx.reply(`🎲 Engaging Social Brain${moodDisplay}... Calculating Optimal Match...`);
-
+bot.action('lobby_join', async (ctx) => {
     try {
-        const response = await axios.post('http://localhost:5001/api/group-decision', {
-            constraints: {},
-            mood: moodKey || undefined
-        });
-        const result = response.data;
+        await lobby_manager.handleJoin(ctx);
+    } catch (e) {
+        console.error(e);
+    }
+});
 
-        if (!result.best_option) {
-            return ctx.reply("❌ No consensus could be reached based on the current constraints.");
-        }
-
-        const spot = result.best_option;
-        const mapsQuery = encodeURIComponent(`${spot.name} ${spot.area || ''}`);
-        const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`;
-        const vetoKey = `v_${spot.id || Date.now()}`;
-        vetoSessionStore.set(vetoKey, { name: spot.name, cuisine: spot.cuisine, id: spot.id });
-        setTimeout(() => vetoSessionStore.delete(vetoKey), 30 * 60 * 1000);
-
-        const moodBanner = moodKey ? `\n🎨 *Mood:* ${moodLabel}` : '';
-        const cardText =
-            `🏆 *Optimal Match Found!*${moodBanner}\n\n` +
-            `📍 *${spot.name}*\n` +
-            `🥘 Cuisine: ${spot.cuisine || 'Unknown'}\n` +
-            `🌆 Area: ${spot.area || 'Unknown'}\n` +
-            `✨ Vibe: ${spot.vibe || 'Unknown'}\n\n` +
-            `🤖 *Reasoning:*\n_${result.reasoning}_`;
-
-        await ctx.replyWithMarkdown(cardText, Markup.inlineKeyboard([
-            [Markup.button.url('🗺️ Get Directions', mapsUrl)],
-            [Markup.button.callback('✅ Accept Spot', `accept_nudge_${spot.id}`), Markup.button.callback('🛑 Veto', `veto_start_${vetoKey}`)]
-        ]));
-
-    } catch (err) {
-        ctx.reply("❌ Consensus Engine Failed: " + err.message);
+bot.action('lobby_finalize', async (ctx) => {
+    try {
+        await lobby_manager.handleFinalize(ctx);
+    } catch (e) {
+        console.error(e);
     }
 });
 
@@ -532,6 +575,7 @@ bot.on('photo', async (ctx) => {
     }
 });
 
+console.log("REACHED BOT.LAUNCH");
 bot.launch()
     .then(() => console.log("🚀 Sovereign Bot is LIVE on Telegram"))
     .catch((err) => console.error("❌ Bot failed to launch:", err.message));

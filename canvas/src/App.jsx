@@ -21,11 +21,17 @@ export default function App() {
   const [memory, setMemory] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchMemory = () => {
     fetch(`${API_BASE}/api/memory`)
       .then(res => res.json())
       .then(data => { setMemory(data); setLoading(false); })
       .catch(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchMemory();
+    const interval = setInterval(fetchMemory, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const pageTitle = activeTab === 'dashboard' ? 'Intelligence Dashboard'

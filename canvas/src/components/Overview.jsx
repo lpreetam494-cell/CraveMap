@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Zap, TrendingUp, Wallet, MapPin, Eye,
-  ArrowUpRight, Activity, Coffee, Pizza, Flame
+  ArrowUpRight, Activity, Coffee, Pizza, Flame, Loader
 } from 'lucide-react';
 
 const CRAVING_ICONS = { biryani: Flame, pizza: Pizza, coffee: Coffee, breakfast: Zap };
@@ -27,6 +27,45 @@ export default function Overview({ memory, loading }) {
   const cravings = memory?.craving_patterns || {};
   const visitedCount = restaurants.filter(r => r.visited).length;
   const bucketCount = restaurants.filter(r => !r.visited).length;
+
+  const [consensusLoading, setConsensusLoading] = useState(false);
+  const [consensusResult, setConsensusResult] = useState(null);
+  const [heartbeatLoading, setHeartbeatLoading] = useState(false);
+  const [heartbeatResult, setHeartbeatResult] = useState(null);
+
+  const handleConsensus = async () => {
+    setConsensusLoading(true);
+    setConsensusResult(null);
+    try {
+      const res = await fetch('http://localhost:5001/api/group-decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ constraints: {} })
+      });
+      const data = await res.json();
+      if (data.best_option) {
+        setConsensusResult({ ok: true, text: `🏆 ${data.best_option.name} — ${data.best_option.cuisine || '?'} (${data.best_option.area || '?'})\n\n${data.reasoning}` });
+      } else {
+        setConsensusResult({ ok: false, text: 'No consensus found. Add more spots to your vault!' });
+      }
+    } catch (e) {
+      setConsensusResult({ ok: false, text: 'Failed to reach consensus engine.' });
+    }
+    setConsensusLoading(false);
+  };
+
+  const handleHeartbeat = async () => {
+    setHeartbeatLoading(true);
+    setHeartbeatResult(null);
+    try {
+      const res = await fetch('http://localhost:5001/api/heartbeat', { method: 'POST' });
+      const data = await res.json();
+      setHeartbeatResult({ ok: data.success, text: data.message });
+    } catch (e) {
+      setHeartbeatResult({ ok: false, text: 'Heartbeat failed — is the server running?' });
+    }
+    setHeartbeatLoading(false);
+  };
 
   const today = new Date();
 
@@ -61,31 +100,36 @@ export default function Overview({ memory, loading }) {
               across <strong className="text-textMain font-bold">{[...new Set(restaurants.map(r => r.area))].length}</strong> areas in Bangalore.
               All behavioral data is stored in your <span className="text-primary font-semibold">Sovereign Data Vault</span> — no cloud, no corporate tracking.
             </p>
+
+            {/* Consensus result banner */}
+            {consensusResult && (
+              <div className={`mt-4 p-3 rounded-xl text-sm whitespace-pre-line border ${consensusResult.ok ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                {consensusResult.text}
+              </div>
+            )}
+            {/* Heartbeat result banner */}
+            {heartbeatResult && (
+              <div className={`mt-3 p-3 rounded-xl text-sm border ${heartbeatResult.ok ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                ⚡ {heartbeatResult.text}
+              </div>
+            )}
           </div>
           <div className="flex gap-3 mt-6">
-            <button 
-              onClick={() => {
-                fetch('http://localhost:5001/api/group-decision', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ constraints: {} })
-                });
-              }}
-              className="a2ui-button flex items-center gap-2"
+            <button
+              onClick={handleConsensus}
+              disabled={consensusLoading}
+              className="a2ui-button flex items-center gap-2 disabled:opacity-60"
             >
-              <Zap size={15} /> Trigger Consensus
+              {consensusLoading ? <Loader size={15} className="animate-spin" /> : <Zap size={15} />}
+              {consensusLoading ? 'Calculating...' : 'Trigger Consensus'}
             </button>
-            <button 
-              onClick={() => {
-                fetch('http://localhost:5001/api/think', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({})
-                });
-              }}
-              className="a2ui-button-ghost flex items-center gap-2"
+            <button
+              onClick={handleHeartbeat}
+              disabled={heartbeatLoading}
+              className="a2ui-button-ghost flex items-center gap-2 disabled:opacity-60"
             >
-              <Activity size={15} /> Force Heartbeat
+              {heartbeatLoading ? <Loader size={15} className="animate-spin" /> : <Activity size={15} />}
+              {heartbeatLoading ? 'Running...' : 'Force Heartbeat'}
             </button>
           </div>
         </motion.div>

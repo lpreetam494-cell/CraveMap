@@ -63,15 +63,15 @@ bot.start(async (ctx) => {
     } catch (e) {}
 
     ctx.reply(
-        "Welcome back to *CraveMap Sovereign!* 🧠\n\n" +
+        "Welcome back to *CraveMap Sovereign* 🧠\n\n" +
         "*Commands:*\n" +
-        "/discover `<area>` — Scout new restaurants\n" +
-        "/consensus `[mood]` — Group decision (e.g. `/consensus celebrations`)\n" +
-        "/export\_vault — Download your data\n" +
-        "/wipe\_memory — Nuclear wipe\n" +
-        "/privacy\_mode — Toggle graph visibility\n\n" +
-        "*Moods:* `celebrations` `quick_bite` `date_night` `comfort` `healthy`\n\n" +
-        "📸 *Pro tip:* Send a *photo* of your meal and I'll verify the visit automatically!",
+        "/discover Koramangala — Scout new restaurants\n" +
+        "/consensus celebrations — Group decision with mood\n" +
+        "/export\\_vault — Download your data\n" +
+        "/wipe\\_memory — Nuclear wipe\n" +
+        "/privacy\\_mode — Toggle graph visibility\n\n" +
+        "*Moods:* celebrations, quick bite, date night, comfort, healthy\n\n" +
+        "Send a photo of your meal and I will verify the visit automatically.",
         { parse_mode: 'Markdown' }
     );
 });
@@ -264,7 +264,7 @@ bot.action(/accept_nudge_(.+)/, (ctx) => {
             }
             
             fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
-            ctx.reply(`✅ **${spot.name}** has been marked as visited!\n\nYour Behavioral Taste Profile has been updated, and the ${spot.cuisine || 'food'} craving cycle has been reset.`);
+            ctx.reply(`✅ *${spot.name}* has been marked as visited!\n\nYour Behavioral Taste Profile has been updated, and the ${spot.cuisine || 'food'} craving cycle has been reset.`, { parse_mode: 'Markdown' });
         }
     } catch (e) {
         ctx.reply("Failed to update Behavioral Taste Profile.");

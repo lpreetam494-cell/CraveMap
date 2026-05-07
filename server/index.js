@@ -11,7 +11,7 @@ const { discoverRestaurants, runDiscoveryPipeline } = require('./skills/discover
 const { getRecommendation } = require('./skills/taste_alchemist');
 const { findBestRestaurant } = require('./skills/group_consensus');
 const { getAmbientContext } = require('./skills/weather_service');
-const { getProactiveTriggers } = require('./skills/lifestyle_operator');
+const { getProactiveTriggers, enforceVariety } = require('./skills/lifestyle_operator');
 const { searchVault } = require('./skills/vault_search');
 const { applyMoodToConstraints } = require('./skills/mood_profiles');
 const { spawn } = require('child_process');
@@ -337,6 +337,62 @@ app.post('/api/verify-visit', async (req, res) => {
             return res.status(500).json({ success: false, error: 'Failed to parse verifier output', raw: stdout });
         }
     });
+});
+
+// 9. Heartbeat (Agency Daemon — triggered from frontend)
+app.post('/api/heartbeat', async (req, res) => {
+    emitThought('Agency Daemon', 'WAKEUP', 'Heartbeat triggered from dashboard...');
+    try {
+        const memory = readVault('food_memory.json');
+        const { triggers, timeVibe } = await getProactiveTriggers(memory);
+        const penaltyMap = enforceVariety(memory.restaurants || []);
+
+        const cravings = memory.craving_patterns || {};
+        const now = new Date();
+        let nudgeReasons = [];
+        let forcedConstraints = { vetoes: [] };
+
+        // Check craving cycles
+        for (const [cuisine, data] of Object.entries(cravings)) {
+            const lastHad = new Date(data.last_satisfied || data.last_had || new Date());
+            const cycleDays = data.cooldown_days || 5;
+            const daysSince = Math.ceil((now - lastHad) / (1000 * 60 * 60 * 24));
+            if (daysSince >= cycleDays) {
+                nudgeReasons.push(`🍛 ${cuisine} craving overdue by ${daysSince - cycleDays} day(s)`);
+                if (!forcedConstraints.boosts) forcedConstraints.boosts = {};
+                forcedConstraints.boosts[cuisine] = 5.0;
+            }
+        }
+
+        // Add environmental triggers
+        triggers.forEach(t => {
+            nudgeReasons.push(t.message);
+            if (t.tags) forcedConstraints.must_include_tags = t.tags;
+        });
+
+        // Apply variety penalties
+        for (const [cuisine, penalty] of Object.entries(penaltyMap)) {
+            if (!forcedConstraints.boosts) forcedConstraints.boosts = {};
+            forcedConstraints.boosts[cuisine] = penalty;
+        }
+
+        emitThought('Agency Daemon', 'ANALYSIS', nudgeReasons.length > 0
+            ? `Found ${nudgeReasons.length} active trigger(s).`
+            : 'All cycles healthy. No intervention needed.');
+
+        return res.json({
+            success: true,
+            nudgeReasons,
+            timeVibe,
+            triggerCount: nudgeReasons.length,
+            message: nudgeReasons.length > 0
+                ? `Found ${nudgeReasons.length} active trigger(s): ${nudgeReasons.join('; ')}`
+                : 'All craving cycles healthy. No proactive nudges needed right now.'
+        });
+    } catch (err) {
+        emitThought('Agency Daemon', 'ERROR', err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 const PORT = process.env.PORT || 5001;

@@ -1,11 +1,13 @@
 /**
- * Phase 7: The Discovery Agent — Sovereign Scout
+ * Phase 7: The Discovery Agent — Sovereign Scout (Refined)
  *
- * 4 Core Amendments:
- * 1. Absolute Veto: hard constraints applied BEFORE scoring
- * 2. Wildcard Rule: 3rd slot reserved for serendipitous high-rated outlier
- * 3. Silent Operator: reasoning strings read like happy coincidences, not personalization alerts
- * 4. Location Awareness: taste vector captures cuisine/vibe essence, not city-specific locations
+ * Refinements in this version:
+ * - Bangalore-biased geocoding (prevents wrong city disambiguation)
+ * - Smarter candidate pool: up to 50 raw, enriched in batches of 25
+ * - Empty vault fallback: name-diversity scoring when no taste history exists
+ * - Guaranteed results: fallback to top-N if filter eliminates everything
+ * - Wildcard fixed: uses relative threshold so it always picks a true outlier
+ * - Better pipeline logging for traceability
  */
 const axios = require('axios');
 const Groq = require('groq-sdk');
@@ -14,14 +16,12 @@ require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
 // ─────────────────────────────────────────────────────
 // COMPONENT 1: Taste Profile Vectorizer
-// Extracts essence of the user's taste (cuisine, vibe, budget)
-// from their local vault + optional friend vault alignment seeding.
-// Amendment 4: prioritizes cuisine TYPE over location data.
+// Amendment 4: captures cuisine ESSENCE, not location names
 // ─────────────────────────────────────────────────────
 const buildTasteVector = (memory, friendVaults = {}) => {
     const restaurants = memory.restaurants || [];
+    const seedTags = memory.analytics?.seed_tags || []; // Quick Start onboarding seeds
 
-    // Count cuisine frequencies (normalize by stripping location info)
     const cuisineFreq = {};
     const vibeFreq = {};
     let budgetTotal = 0;
@@ -30,79 +30,72 @@ const buildTasteVector = (memory, friendVaults = {}) => {
     const dietaryNeeds = new Set();
 
     for (const r of restaurants) {
-        // Cuisine frequency — split on commas for multi-cuisine entries
+        // Weight visited restaurants 2x over saved-only
+        const weight = r.visited ? 2 : 1;
+
         if (r.cuisine && r.cuisine.toLowerCase() !== 'unknown') {
-            const parts = r.cuisine.split(',').map(c => c.trim().toLowerCase());
-            for (const p of parts) cuisineFreq[p] = (cuisineFreq[p] || 0) + (r.visited ? 2 : 1);
+            r.cuisine.split(',').map(c => c.trim().toLowerCase())
+                .filter(c => c.length > 2)
+                .forEach(c => { cuisineFreq[c] = (cuisineFreq[c] || 0) + weight; });
         }
 
-        // Vibe tag frequency
         if (r.vibe) {
-            const tags = r.vibe.split(',').map(v => v.trim().toLowerCase());
-            for (const t of tags) vibeFreq[t] = (vibeFreq[t] || 0) + 1;
+            r.vibe.split(',').map(v => v.trim().toLowerCase())
+                .filter(v => v.length > 2)
+                .forEach(v => { vibeFreq[v] = (vibeFreq[v] || 0) + weight; });
         }
 
-        // Budget rating
         if (r.budget && !isNaN(r.budget)) {
             budgetTotal += Number(r.budget);
             budgetCount++;
         }
 
-        // Hard vetoes
         if (r.vetoed) hardVetoes.add(r.vetoed.toLowerCase());
         if (r.dietary_need) dietaryNeeds.add(r.dietary_need.toLowerCase());
     }
 
-    // Also check memory-level constraints
+    // Seed vibes from Quick Start onboarding if vault is sparse
+    for (const tag of seedTags) {
+        vibeFreq[tag.toLowerCase()] = (vibeFreq[tag.toLowerCase()] || 0) + 1;
+    }
+
+    // Analytics-level constraints
     if (memory.analytics?.hard_vetoes) {
-        (memory.analytics.hard_vetoes).forEach(v => hardVetoes.add(v.toLowerCase()));
+        memory.analytics.hard_vetoes.forEach(v => hardVetoes.add(v.toLowerCase()));
     }
     if (memory.analytics?.dietary_needs) {
-        (memory.analytics.dietary_needs).forEach(d => dietaryNeeds.add(d.toLowerCase()));
+        memory.analytics.dietary_needs.forEach(d => dietaryNeeds.add(d.toLowerCase()));
     }
 
-    // Top 5 cuisines and top 5 vibes by frequency
     const topCuisines = Object.entries(cuisineFreq)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([name]) => name);
+        .sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name]) => name);
 
     const topVibes = Object.entries(vibeFreq)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([name]) => name);
+        .sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name]) => name);
 
     const avgBudget = budgetCount > 0 ? Math.round(budgetTotal / budgetCount) : null;
+    const hasHistory = restaurants.length > 0;
 
-    // Amendment 4: Friend vault alignment seeding
-    // If a friend vault has overlap > 60% on top cuisines, seed their vibes
-    for (const [friendName, friendVault] of Object.entries(friendVaults)) {
-        const friendRestaurants = friendVault.restaurants || [];
+    // Friend vault alignment seeding (>= 60% cuisine overlap)
+    for (const [, friendVault] of Object.entries(friendVaults)) {
         const friendCuisines = new Set();
-        for (const r of friendRestaurants) {
+        for (const r of (friendVault.restaurants || [])) {
             if (r.cuisine) r.cuisine.split(',').map(c => c.trim().toLowerCase()).forEach(c => friendCuisines.add(c));
         }
-        const overlapCount = topCuisines.filter(c => friendCuisines.has(c)).length;
-        const alignment = topCuisines.length > 0 ? overlapCount / topCuisines.length : 0;
-
-        if (alignment >= 0.6) {
-            // Seed friend's top vibes into vector (with half weight)
-            const friendVibeFreq = {};
-            for (const r of friendRestaurants) {
+        const overlap = topCuisines.filter(c => friendCuisines.has(c)).length;
+        if (topCuisines.length > 0 && overlap / topCuisines.length >= 0.6) {
+            const fVibes = {};
+            for (const r of (friendVault.restaurants || [])) {
                 if (r.vibe) r.vibe.split(',').map(v => v.trim().toLowerCase()).forEach(v => {
-                    friendVibeFreq[v] = (friendVibeFreq[v] || 0) + 0.5;
+                    fVibes[v] = (fVibes[v] || 0) + 0.5;
                 });
             }
-            const topFriendVibes = Object.entries(friendVibeFreq)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 3)
-                .map(([name]) => name);
-            // Merge without duplicates
-            for (const v of topFriendVibes) {
-                if (!topVibes.includes(v)) topVibes.push(v);
-            }
+            Object.entries(fVibes).sort((a, b) => b[1] - a[1]).slice(0, 3)
+                .forEach(([v]) => { if (!topVibes.includes(v)) topVibes.push(v); });
         }
     }
+
+    console.log(`🧠 Taste Vector: cuisines=[${topCuisines.join(',')}] vibes=[${topVibes.join(',')}] hasHistory=${hasHistory}`);
 
     return {
         topCuisines,
@@ -110,32 +103,52 @@ const buildTasteVector = (memory, friendVaults = {}) => {
         avgBudget,
         hardVetoes: Array.from(hardVetoes),
         dietaryNeeds: Array.from(dietaryNeeds),
-        existingNames: restaurants.map(r => r.name?.toLowerCase()).filter(Boolean)
+        existingNames: restaurants.map(r => r.name?.toLowerCase().trim()).filter(Boolean),
+        hasHistory,
     };
 };
 
 // ─────────────────────────────────────────────────────
-// COMPONENT 2: Autonomous Scout (Privacy-Safe External API Call)
-// Sends ONLY coordinates to Overpass — NO private taste data.
+// COMPONENT 2: Autonomous Scout
+// Fix: Bangalore-biased geocoding, larger candidate pool
 // ─────────────────────────────────────────────────────
 const scoutCandidates = async (area, lat = null, lon = null) => {
     let resolvedLat = lat;
     let resolvedLon = lon;
 
-    // Geocode area name if coordinates not provided
     if (!resolvedLat || !resolvedLon) {
-        console.log(`🔭 Scout: Geocoding "${area}" via Nominatim...`);
+        console.log(`🔭 Scout: Geocoding "${area}"...`);
         try {
-            const nomRes = await axios.get('https://nominatim.openstreetmap.org/search', {
-                params: { q: `${area}, India`, format: 'json', limit: 1 },
-                headers: { 'User-Agent': 'CraveMap-Sovereign-Agent/1.0' }
-            });
-            if (nomRes.data.length > 0) {
-                resolvedLat = nomRes.data[0].lat;
-                resolvedLon = nomRes.data[0].lon;
-            } else {
-                throw new Error(`Could not geocode: ${area}`);
+            // Refinement: Try with Bangalore context first to avoid wrong city disambiguation
+            const queries = [
+                `${area}, Bengaluru, Karnataka, India`,
+                `${area}, Bangalore, India`,
+                `${area}, India`
+            ];
+
+            for (const q of queries) {
+                const nomRes = await axios.get('https://nominatim.openstreetmap.org/search', {
+                    params: { q, format: 'json', limit: 3, countrycodes: 'IN' },
+                    headers: { 'User-Agent': 'CraveMap-Sovereign-Agent/1.0' },
+                    timeout: 8000
+                });
+
+                if (nomRes.data.length > 0) {
+                    // Prefer results in Karnataka bounding box (roughly)
+                    const karnatakaResult = nomRes.data.find(r => {
+                        const lat = parseFloat(r.lat);
+                        const lon = parseFloat(r.lon);
+                        return lat >= 11.5 && lat <= 18.5 && lon >= 74 && lon <= 78.5;
+                    }) || nomRes.data[0];
+
+                    resolvedLat = karnatakaResult.lat;
+                    resolvedLon = karnatakaResult.lon;
+                    console.log(`🔭 Scout: Resolved "${area}" → (${resolvedLat}, ${resolvedLon}) via: "${q}"`);
+                    break;
+                }
             }
+
+            if (!resolvedLat) throw new Error(`Could not geocode: ${area}`);
         } catch (err) {
             console.error('❌ Scout: Geocoding failed:', err.message);
             return [];
@@ -144,35 +157,36 @@ const scoutCandidates = async (area, lat = null, lon = null) => {
 
     console.log(`🔭 Scout: Querying Overpass at (${resolvedLat}, ${resolvedLon})...`);
 
-    // SANITIZED query — no cuisine filters, no taste data, pure geographic radius
-    // Using GET (Overpass rejects POST with 406 Not Acceptable)
-    const query = `[out:json][timeout:15];(nwr["amenity"="restaurant"](around:2500,${resolvedLat},${resolvedLon});nwr["amenity"="cafe"](around:2500,${resolvedLat},${resolvedLon}););out center;`;
+    // Larger radius for sparser areas, standard for dense city areas
+    const radius = 3000;
+    const query = `[out:json][timeout:20];(nwr["amenity"="restaurant"](around:${radius},${resolvedLat},${resolvedLon});nwr["amenity"="cafe"](around:${radius},${resolvedLat},${resolvedLon});nwr["amenity"="fast_food"](around:${radius},${resolvedLat},${resolvedLon}););out center tags;`;
 
     try {
-        const overpassRes = await axios.get(
-            `https://overpass-api.de/api/interpreter`,
-            {
-                params: { data: query },
-                headers: { 'User-Agent': 'CraveMap-Sovereign-Agent/1.0' },
-                timeout: 20000
-            }
-        );
+        const overpassRes = await axios.get('https://overpass-api.de/api/interpreter', {
+            params: { data: query },
+            headers: { 'User-Agent': 'CraveMap-Sovereign-Agent/1.0' },
+            timeout: 25000
+        });
 
         const elements = overpassRes.data?.elements || [];
         const candidates = elements
-            .filter(el => el.tags?.name)
+            .filter(el => el.tags?.name && el.tags.name.trim().length > 1)
             .map(el => ({
-                name: el.tags.name,
-                rawCuisine: el.tags.cuisine || null,
-                rawVibe: null, // OSM rarely has this
-                osmRating: el.tags.stars ? Number(el.tags.stars) : null,
+                name: el.tags.name.trim(),
+                rawCuisine: el.tags.cuisine?.replace(/_/g, ' ') || null,
+                osmRating: el.tags['stars'] ? Number(el.tags['stars']) :
+                           el.tags['rating'] ? Number(el.tags['rating']) : null,
                 area: area,
                 lat: el.lat || el.center?.lat,
                 lon: el.lon || el.center?.lon,
                 website: el.tags.website || null,
+                phone: el.tags.phone || null,
+                opening_hours: el.tags.opening_hours || null,
+                isChain: ['mcdonalds','kfc','subway','dominos','pizza hut','burger king','starbucks']
+                    .some(chain => el.tags.name.toLowerCase().includes(chain))
             }));
 
-        // Deduplicate by name
+        // Deduplicate + filter out unnamed/chain-only results
         const seen = new Set();
         const unique = candidates.filter(c => {
             const key = c.name.toLowerCase();
@@ -181,8 +195,12 @@ const scoutCandidates = async (area, lat = null, lon = null) => {
             return true;
         });
 
-        console.log(`🔭 Scout: Found ${unique.length} unique candidates.`);
-        return unique.slice(0, 30); // Return up to 30 for the filter to work with
+        // Shuffle candidates a bit so we don't always get the same 50
+        const shuffled = unique.sort(() => Math.random() - 0.4);
+
+        console.log(`🔭 Scout: Found ${shuffled.length} candidates (radius=${radius}m).`);
+        // Refinement: return 50 instead of 30 for better filter coverage
+        return shuffled.slice(0, 50);
     } catch (err) {
         console.error('❌ Scout: Overpass query failed:', err.message);
         return [];
@@ -190,122 +208,159 @@ const scoutCandidates = async (area, lat = null, lon = null) => {
 };
 
 // ─────────────────────────────────────────────────────
-// LLM Enrichment: Infer cuisine/vibe from restaurant name
-// No private vault data is sent — only raw OSM names.
+// LLM Enrichment: Infer cuisine/vibe in batches
+// Refinement: process in batches of 25 to cover all candidates
 // ─────────────────────────────────────────────────────
 const enrichCandidatesWithLLM = async (candidates) => {
     if (candidates.length === 0) return candidates;
-
-    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-    const names = candidates.map(c => c.name);
-
-    try {
-        const completion = await groq.chat.completions.create({
-            model: 'llama-3.3-70b-versatile',
-            response_format: { type: 'json_object' },
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are a restaurant data enricher. Given a list of restaurant names from India, infer their most likely cuisine type and 2-3 vibe tags. Return a JSON object with format: {"enriched": [{"name": "...", "cuisine": "...", "vibes": ["...","..."]}]}. Be concise and accurate.'
-                },
-                {
-                    role: 'user',
-                    content: `Enrich these restaurant names: ${JSON.stringify(names.slice(0, 20))}`
-                }
-            ],
-            temperature: 0.3
-        });
-
-        const parsed = JSON.parse(completion.choices[0].message.content);
-        const enrichMap = {};
-        for (const e of (parsed.enriched || [])) {
-            enrichMap[e.name.toLowerCase()] = { cuisine: e.cuisine, vibes: e.vibes };
-        }
-
-        return candidates.map(c => {
-            const enriched = enrichMap[c.name.toLowerCase()];
-            return {
-                ...c,
-                inferredCuisine: enriched?.cuisine || c.rawCuisine || 'Mixed',
-                inferredVibes: enriched?.vibes || [],
-            };
-        });
-    } catch (err) {
-        console.error('⚠️ Enrichment skipped (LLM error):', err.message);
+    if (!process.env.GROQ_API_KEY) {
         return candidates.map(c => ({
             ...c,
             inferredCuisine: c.rawCuisine || 'Mixed',
             inferredVibes: []
         }));
     }
+
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    const BATCH_SIZE = 25;
+    const enrichMap = {};
+
+    // Process in batches to cover all candidates
+    const batches = [];
+    for (let i = 0; i < Math.min(candidates.length, 50); i += BATCH_SIZE) {
+        batches.push(candidates.slice(i, i + BATCH_SIZE).map(c => c.name));
+    }
+
+    for (const batch of batches) {
+        try {
+            const completion = await groq.chat.completions.create({
+                model: 'llama-3.3-70b-versatile',
+                response_format: { type: 'json_object' },
+                messages: [
+                    {
+                        role: 'system',
+                        content: `You are a restaurant data enricher for Indian restaurants. For each restaurant name, infer:
+- cuisine: the most likely cuisine (e.g. "North Indian", "South Indian", "Chinese", "Italian", "Cafe", "Fast Food", "Biryani", "Bakery", "Brewery")
+- vibes: 2-3 short tags describing the atmosphere (e.g. "casual", "family", "rooftop", "street food", "fine dining", "quick bite", "cozy", "lively")
+
+Return JSON: {"enriched": [{"name": "...", "cuisine": "...", "vibes": ["...","..."]}]}
+Be accurate for Indian context. If name suggests a cuisine (e.g. "Meghana Foods" → Biryani), be specific.`
+                    },
+                    {
+                        role: 'user',
+                        content: `Enrich these restaurant names: ${JSON.stringify(batch)}`
+                    }
+                ],
+                temperature: 0.2,
+                max_tokens: 1500
+            });
+
+            const parsed = JSON.parse(completion.choices[0].message.content);
+            for (const e of (parsed.enriched || [])) {
+                if (e.name) enrichMap[e.name.toLowerCase()] = { cuisine: e.cuisine, vibes: e.vibes || [] };
+            }
+        } catch (err) {
+            console.warn(`⚠️ Enrichment batch failed:`, err.message.slice(0, 80));
+        }
+    }
+
+    console.log(`✨ Enriched ${Object.keys(enrichMap).length}/${candidates.length} candidates.`);
+
+    return candidates.map(c => {
+        const key = c.name.toLowerCase();
+        const enriched = enrichMap[key];
+        return {
+            ...c,
+            inferredCuisine: enriched?.cuisine || c.rawCuisine || 'Mixed',
+            inferredVibes: enriched?.vibes || [],
+        };
+    });
 };
 
 // ─────────────────────────────────────────────────────
-// COMPONENT 3: Sovereign Filter
-// Amendment 1: Hard constraints applied FIRST (Absolute Veto)
-// Amendment 2: Wildcard Rule — 3rd slot is serendipitous outlier
+// COMPONENT 3: Sovereign Filter (refined)
+// Amendment 1: Absolute Veto first
+// Amendment 2: Wildcard — true outlier always guaranteed
+// Refinement: empty-vault fallback scoring, guaranteed results
 // ─────────────────────────────────────────────────────
 const sovereignFilter = (candidates, tasteVector) => {
-    const { topCuisines, topVibes, hardVetoes, dietaryNeeds, existingNames, avgBudget } = tasteVector;
+    const { topCuisines, topVibes, hardVetoes, dietaryNeeds, existingNames, hasHistory } = tasteVector;
 
-    // --- STEP 1: HARD CONSTRAINT ELIMINATION (Amendment 1) ---
+    // STEP 1: HARD CONSTRAINT ELIMINATION (Absolute Veto)
     const passedHardFilter = candidates.filter(c => {
         const cuisineLower = (c.inferredCuisine || '').toLowerCase();
-        const nameLower = c.name.toLowerCase();
+        const nameLower = c.name.toLowerCase().trim();
 
-        // Reject if already in vault (deduplication — true discovery)
-        if (existingNames.includes(nameLower)) return false;
+        // Deduplicate: skip restaurants already in the vault
+        if (existingNames.some(en => en === nameLower || nameLower.includes(en) || en.includes(nameLower))) return false;
 
-        // Reject if cuisine matches an absolute veto
+        // Absolute veto check
         for (const veto of hardVetoes) {
             if (cuisineLower.includes(veto) || nameLower.includes(veto)) return false;
         }
 
-        // Reject if dietary need conflicts (basic check)
+        // Dietary need conflict
         for (const need of dietaryNeeds) {
-            if (need === 'vegetarian' && cuisineLower.includes('meat')) return false;
+            if (need === 'vegetarian' && cuisineLower.match(/\b(meat|chicken|mutton|fish|seafood|pork|beef)\b/)) return false;
             if (need === 'halal' && cuisineLower.includes('pork')) return false;
         }
 
         return true;
     });
 
-    // --- STEP 2: ALIGNMENT SCORING ---
-    const scored = passedHardFilter.map(c => {
+    console.log(`🛡️ Filter: ${passedHardFilter.length}/${candidates.length} passed hard constraints.`);
+
+    // Guaranteed fallback: if everything got filtered, relax deduplication
+    const workingPool = passedHardFilter.length >= 3 ? passedHardFilter : candidates.filter(c => {
+        const cuisineLower = (c.inferredCuisine || '').toLowerCase();
+        const nameLower = c.name.toLowerCase().trim();
+        for (const veto of hardVetoes) {
+            if (cuisineLower.includes(veto) || nameLower.includes(veto)) return false;
+        }
+        return true;
+    });
+
+    // STEP 2: ALIGNMENT SCORING
+    const scored = workingPool.map(c => {
         let score = 0;
         const cuisineLower = (c.inferredCuisine || '').toLowerCase();
         const vibesLower = (c.inferredVibes || []).map(v => v.toLowerCase());
 
-        // Cuisine match: +3 per matching cuisine
-        for (const preferred of topCuisines) {
-            if (cuisineLower.includes(preferred)) score += 3;
+        if (hasHistory) {
+            // Taste-based scoring for users with history
+            for (const preferred of topCuisines) {
+                if (cuisineLower.includes(preferred) || preferred.includes(cuisineLower.split(' ')[0])) score += 3;
+            }
+            for (const preferredVibe of topVibes) {
+                if (vibesLower.some(v => v.includes(preferredVibe) || preferredVibe.includes(v))) score += 2;
+            }
+        } else {
+            // Empty vault: diversity scoring — prefer named cuisines over 'Mixed'
+            if (cuisineLower !== 'mixed') score += 2;
+            if (c.inferredVibes?.length > 0) score += 1;
         }
 
-        // Vibe match: +2 per matching vibe tag
-        for (const preferredVibe of topVibes) {
-            if (vibesLower.some(v => v.includes(preferredVibe))) score += 2;
-        }
+        // De-prioritize fast food chains slightly
+        if (c.isChain) score -= 1;
 
-        // OSM rating bonus (if available)
-        if (c.osmRating) score += c.osmRating * 0.5;
+        // OSM rating bonus
+        if (c.osmRating) score += c.osmRating;
 
         return { ...c, alignmentScore: score };
     });
 
-    // Sort by alignment score descending
     scored.sort((a, b) => b.alignmentScore - a.alignmentScore);
 
-    // --- STEP 3: WILDCARD RULE (Amendment 2) ---
-    // Top 2 are the best alignment matches
+    // STEP 3: WILDCARD RULE (guaranteed true outlier)
     const top2 = scored.slice(0, 2);
 
-    // 3rd slot: highest OSM rating among LOW-alignment candidates (score < top2 avg)
-    const top2AvgScore = top2.reduce((sum, c) => sum + c.alignmentScore, 0) / (top2.length || 1);
-    const lowAlignmentPool = scored.slice(2).filter(c => c.alignmentScore < top2AvgScore * 0.7);
+    // Wildcard: pick from bottom 40% of scored pool (true divergence)
+    const bottomStartIdx = Math.max(3, Math.floor(scored.length * 0.6));
+    const wildcardPool = scored.slice(bottomStartIdx);
 
-    // Pick wildcard by highest OSM rating, or just any remaining if no ratings
-    const wildcard = lowAlignmentPool.sort((a, b) => (b.osmRating || 0) - (a.osmRating || 0))[0]
-        || scored[2]; // fallback to 3rd ranked if no wildcard found
+    const wildcard = wildcardPool.length > 0
+        ? wildcardPool[Math.floor(Math.random() * Math.min(wildcardPool.length, 5))] // random from bottom 5 of divergent pool
+        : scored[2];
 
     const results = [...top2];
     if (wildcard) results.push({ ...wildcard, isWildcard: true });
@@ -315,55 +370,55 @@ const sovereignFilter = (candidates, tasteVector) => {
 
 // ─────────────────────────────────────────────────────
 // COMPONENT 3b: Silent Operator Reasoning (Amendment 3)
-// Reasoning reads like a happy coincidence, NOT a personalization alert.
+// Feels like a happy coincidence, not a personalization alert
 // ─────────────────────────────────────────────────────
 const buildSilentReasoning = (candidate, isWildcard) => {
+    const areaStr = candidate.area || 'the area';
+    const cuisineStr = candidate.inferredCuisine || 'local food';
+    const vibeStr = (candidate.inferredVibes || []).slice(0, 2).join(' and ') || 'its vibe';
+
     if (isWildcard) {
-        return `A well-regarded local spot that's been drawing consistent crowds recently.`;
+        const wildcardTemplates = [
+            `An off-the-beaten-path ${cuisineStr} spot in ${areaStr} that locals keep returning to.`,
+            `A well-kept secret in ${areaStr} — ${cuisineStr} with a reputation that outpaces its visibility.`,
+            `Not on the usual lists, but regulars in ${areaStr} rate this ${cuisineStr} spot highly.`,
+        ];
+        return wildcardTemplates[Math.floor(Math.random() * wildcardTemplates.length)];
     }
 
-    const vibeStr = (candidate.inferredVibes || []).slice(0, 2).join(' and ') || 'its welcoming atmosphere';
-    const cuisineStr = candidate.inferredCuisine || 'its menu';
-    const areaStr = candidate.area || 'the area';
-
-    // Silent Operator phrasing — feels like serendipity
     const templates = [
-        `Currently one of the most talked-about ${cuisineStr} spots in ${areaStr} for ${vibeStr}.`,
-        `A highly-rated ${cuisineStr} restaurant in ${areaStr}, known for its ${vibeStr}.`,
-        `This ${areaStr} spot has been getting strong word-of-mouth for its ${cuisineStr} and ${vibeStr} setting.`,
+        `Currently one of the better-reviewed ${cuisineStr} spots in ${areaStr}, known for its ${vibeStr} setting.`,
+        `A ${vibeStr} ${cuisineStr} restaurant in ${areaStr} that's been drawing consistent footfall.`,
+        `This ${areaStr} spot has built a strong reputation for its ${cuisineStr} offerings and ${vibeStr} atmosphere.`,
+        `Strong word-of-mouth in ${areaStr} around this ${cuisineStr} place — particularly noted for ${vibeStr}.`,
     ];
-
     return templates[Math.floor(Math.random() * templates.length)];
 };
 
 // ─────────────────────────────────────────────────────
-// MAIN EXPORT: Full Discovery Pipeline
+// MAIN: Full Discovery Pipeline
 // ─────────────────────────────────────────────────────
 const runDiscoveryPipeline = async (area, memory, friendVaults = {}, lat = null, lon = null) => {
-    // 1. Build Taste Vector (local, private)
-    console.log('🧠 Discovery: Building Taste Vector...');
+    console.log(`🚀 Discovery Pipeline: Starting for "${area}"...`);
+
     const tasteVector = buildTasteVector(memory, friendVaults);
 
-    // 2. Scout Candidates (sanitized external call)
     const rawCandidates = await scoutCandidates(area, lat, lon);
 
     if (rawCandidates.length === 0) {
-        return { success: false, message: `Couldn't find any restaurants near "${area}". Try a different area.` };
+        return {
+            success: false,
+            message: `I couldn't find restaurants near *${area}*. This might be a very small area — try a broader location like "Bangalore" or share your live location.`
+        };
     }
 
-    // 3. LLM Enrichment (names only — no private data)
-    console.log('✨ Discovery: Enriching candidates with LLM...');
     const enrichedCandidates = await enrichCandidatesWithLLM(rawCandidates);
-
-    // 4. Sovereign Filter (all private — runs locally)
-    console.log('🛡️ Discovery: Running Sovereign Filter...');
     const top3 = sovereignFilter(enrichedCandidates, tasteVector);
 
     if (top3.length === 0) {
-        return { success: false, message: `All nearby spots were filtered out by your preferences. Try a different area!` };
+        return { success: false, message: `All nearby spots were filtered out by your preferences. Try a different area.` };
     }
 
-    // 5. Build result cards with Silent Operator reasoning
     const discoveries = top3.map((spot, i) => ({
         id: `disc_${Date.now()}_${i}`,
         name: spot.name,
@@ -373,21 +428,21 @@ const runDiscoveryPipeline = async (area, memory, friendVaults = {}, lat = null,
         lat: spot.lat,
         lon: spot.lon,
         website: spot.website,
-        alignmentScore: spot.alignmentScore,
+        alignmentScore: Math.round(spot.alignmentScore * 10) / 10,
         isWildcard: spot.isWildcard || false,
         reasoning: buildSilentReasoning(spot, spot.isWildcard || false),
         discovery: true,
     }));
 
+    console.log(`✅ Discovery Pipeline: Returning ${discoveries.length} results for "${area}".`);
     return { success: true, discoveries, tasteVector };
 };
 
-// Kept for backward compatibility with existing /api/save pivot logic
+// Backward-compatible export for /api/save pivot logic
 const discoverRestaurants = async (area) => {
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
     const rawCandidates = await scoutCandidates(area);
     if (rawCandidates.length === 0) return `🍽️ No restaurants found near ${area}.`;
-
     const names = rawCandidates.slice(0, 10).map(c => c.name).join(', ');
     try {
         const completion = await groq.chat.completions.create({

@@ -79,6 +79,54 @@ export default function Overview({ memory, loading }) {
         <StatCard icon={Wallet} label="Weekly Spend" value={`₹${analytics.weekly_spend || 0}`} accent="orange" />
       </div>
 
+      {/* ─── Sovereign Food Persona ─── */}
+      {memory?.user_profile && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="a2ui-card bg-gradient-to-br from-slate-900 to-slate-800 text-white border-0 shadow-xl shadow-slate-900/20 relative overflow-hidden"
+        >
+          {/* Decorative background elements */}
+          <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-primary/20 rounded-full blur-3xl mix-blend-screen" />
+          <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-64 h-64 bg-blue-500/20 rounded-full blur-3xl mix-blend-screen" />
+          
+          <div className="relative z-10 flex flex-col md:flex-row gap-8 items-center justify-between">
+            <div className="flex items-center gap-6">
+              <div className="w-20 h-20 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 shadow-inner">
+                <span className="text-4xl">🧬</span>
+              </div>
+              <div>
+                <div className="flex items-center gap-3 mb-1">
+                  <h3 className="text-2xl font-black tracking-tight">{memory.user_profile.persona_name || "Synthesizing Persona..."}</h3>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-primary text-white">Food DNA Active</span>
+                </div>
+                <p className="text-slate-300 font-medium">Primary Identity: {memory.user_profile.name}</p>
+              </div>
+            </div>
+            
+            <div className="flex flex-wrap gap-3">
+              <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
+                <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Vibe</span>
+                <span className="font-semibold text-sm">{memory.user_profile.vibe}</span>
+              </div>
+              <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
+                <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Budget</span>
+                <span className="font-semibold text-sm text-green-400">{memory.user_profile.budget}</span>
+              </div>
+              <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
+                <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Heat Index</span>
+                <span className="font-semibold text-sm text-orange-400">{memory.user_profile.heat}</span>
+              </div>
+              <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
+                <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Dietary</span>
+                <span className="font-semibold text-sm text-blue-300">{(memory.user_profile.dietary || []).join(', ') || 'None'}</span>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* ─── Main Grid ─── */}
       <div className="grid grid-cols-3 gap-6">
         {/* Sovereign Memory Status — spans 2 cols */}

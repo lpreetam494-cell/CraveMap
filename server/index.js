@@ -44,9 +44,22 @@ const writeMemory = (data) => fs.writeFileSync(MEMORY_PATH, JSON.stringify(data,
 
 // --- API ROUTES ---
 
+// Import vault router for per-user vaults
+const { listAllUsers, readUserVault } = require('./skills/vault_router');
+
 // 1. Get Memory (Dashboard)
 app.get('/api/memory', (req, res) => {
     res.json(readMemory());
+});
+
+// 1b. Get All Onboarded Users (Agents Grid)
+app.get('/api/users', (req, res) => {
+    try {
+        const users = listAllUsers();
+        res.json({ agents: users, count: users.length });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 // 2. Save Restaurant (Social Hunter Trigger)
@@ -76,12 +89,24 @@ app.post('/api/save', async (req, res) => {
     emitThought('Social Hunter', 'EXTRACTION', `Metadata extracted: ${extracted.name}`, extracted);
     
     const memory = readMemory();
+    
+    // Implicit Scaling Logic
+    if (extracted.high_intent) {
+        emitThought('Memory Node', 'IMPLICIT_SCALING', `Detected high intent slang/cue. Boosting preferences.`);
+        if (memory.user_profile && extracted.cuisine) {
+            if (!memory.user_profile.boosts) memory.user_profile.boosts = [];
+            memory.user_profile.boosts.push(extracted.cuisine);
+        }
+    }
+
     const newEntry = {
         id: (memory.restaurants.length + 1).toString(),
         ...extracted,
         saved_at: new Date().toISOString().split('T')[0],
         visited: false,
-        rating: null
+        rating: null,
+        high_intent: extracted.high_intent || false,
+        socially_high_value: extracted.socially_high_value || false
     };
     
     memory.restaurants.push(newEntry);
@@ -115,7 +140,7 @@ const writeVault = (filename, data) => {
 
 // 4. Resolve Group Conflict (Consensus Engine Trigger)
 app.post('/api/group-decision', async (req, res) => {
-    let { constraints, mood } = req.body;
+    let { constraints, mood, host_restaurants, peer_vectors } = req.body;
 
     // Apply mood overrides if provided
     if (mood) {
@@ -133,16 +158,31 @@ app.post('/api/group-decision', async (req, res) => {
         }
     } catch (e) {}
 
-    emitThought('Taste Alchemist', 'SYNTHESIS', `Synthesizing preferences across Sovereign Vaults${mood ? ` [mood: ${mood}]` : ''}...`);
-
-    const groupVaults = {
-        "Akash": readVault('food_memory.json'),
-        "Rohan": readVault('rohan_vault.json'),
-        "Priya": readVault('priya_vault.json')
-    };
+    emitThought('Taste Alchemist', 'SYNTHESIS', `Synthesizing preferences across ${peer_vectors ? peer_vectors.length : 1} Sovereign Vaults${mood ? ` [mood: ${mood}]` : ''}...`);
 
     try {
-        const result = await findBestRestaurant(groupVaults, constraints);
+        const payloadForPython = {
+            host_restaurants: host_restaurants || [],
+            peer_vectors: peer_vectors || [],
+            constraints: constraints || {}
+        };
+
+        // If not using the lobby (legacy call from frontend dashboard), fallback to reading local vault
+        if (!host_restaurants || host_restaurants.length === 0) {
+             const myVault = readVault('food_memory.json');
+             payloadForPython.host_restaurants = myVault.restaurants || [];
+             
+             // Create a mock vector for the sole user
+             payloadForPython.peer_vectors = [{
+                 identity: "Local Agent",
+                 dietary: myVault.user_profile?.dietary || [],
+                 cuisines: {},
+                 vibes: {},
+                 budget_limit: myVault.user_profile?.budget || "$$$"
+             }];
+        }
+
+        const result = await findBestRestaurant(payloadForPython);
         
         emitThought('Group Consensus', 'TOPOLOGY', 'Preference Topology calculated.', result);
         

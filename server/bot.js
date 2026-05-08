@@ -812,6 +812,23 @@ bot.on('photo', async (ctx) => {
         }
 
         if (!result.success || !result.identified) {
+            // Check if there are proactive cuisine-based suggestions!
+            if (result.cuisine_visible && Array.isArray(result.suggested_matches) && result.suggested_matches.length > 0) {
+                const matchButtons = result.suggested_matches.slice(0, 3).map(r => {
+                    const base64Name = Buffer.from(r.name).toString('base64').replace(/=/g, '');
+                    return [Markup.button.callback(`✅ Check-in at ${r.name}`, `vchk_${base64Name}`)];
+                });
+                
+                return ctx.reply(
+                    `🤔 *I couldn't identify the specific restaurant name from this photo alone (confidence: 0%), but I see some delicious ${result.cuisine_visible}!* \n\n` +
+                    `Would you like to check in to one of your saved *${result.cuisine_visible}* spots from your vault?`,
+                    {
+                        parse_mode: 'Markdown',
+                        ...Markup.inlineKeyboard(matchButtons)
+                    }
+                );
+            }
+
             return ctx.reply(
                 `🤔 I couldn't confidently identify a restaurant from this photo (confidence: ${Math.round((result.confidence || 0) * 100)}%).\n\n` +
                 `Try a clearer shot of the signage, menu, or food. Or type the restaurant name to save manually.`
@@ -842,6 +859,46 @@ bot.on('photo', async (ctx) => {
 
     } catch (err) {
         ctx.reply('❌ Photo verification failed: ' + err.message);
+    }
+});
+
+// Vision Proactive Check-in Confirmation Action
+bot.action(/vchk_(.+)/, async (ctx) => {
+    ctx.answerCbQuery('Marking visited...');
+    const userId = ctx.from.id;
+    const base64Name = ctx.match[1];
+    
+    try {
+        const { readUserVault, writeUserVault } = require('./skills/vault_router');
+        const vault = await readUserVault(userId);
+        
+        // Find matching restaurant by comparing base64 strings to support arbitrary casing/accents
+        const targetIdx = vault.restaurants.findIndex(r => {
+            const b64 = Buffer.from(r.name).toString('base64').replace(/=/g, '');
+            return b64 === base64Name;
+        });
+        
+        if (targetIdx !== -1) {
+            const restaurantName = vault.restaurants[targetIdx].name;
+            vault.restaurants[targetIdx].visited = true;
+            
+            // Reset craving cycle for this cuisine
+            const cuisine = vault.restaurants[targetIdx].cuisine;
+            if (cuisine) {
+                const cuisines = cuisine.split(',').map(c => c.trim().toLowerCase());
+                if (!vault.craving_patterns) vault.craving_patterns = {};
+                cuisines.forEach(c => {
+                    vault.craving_patterns[c] = { last_satisfied: new Date().toISOString(), cooldown_days: 5 };
+                });
+            }
+            
+            await writeUserVault(userId, vault);
+            ctx.reply(`✅ *Visit Verified!*\n\n📍 *${restaurantName}* has been marked as visited in your vault. Your Craving Cycle timer has been reset! 🔄`, { parse_mode: 'Markdown' });
+        } else {
+            ctx.reply(`⚠️ Spot not found in your vault.`);
+        }
+    } catch (e) {
+        ctx.reply("❌ Check-in failed: " + e.message);
     }
 });
 

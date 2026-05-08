@@ -27,7 +27,12 @@ app.use(bodyParser.json());
 
 // API Authentication Middleware
 app.use('/api', (req, res, next) => {
-    const apiKey = req.headers['x-api-key'];
+    const isLocal = req.ip === '::1' || req.ip === '127.0.0.1' || req.ip === '::ffff:127.0.0.1';
+    if (isLocal) {
+        return next();
+    }
+    
+    const apiKey = req.headers['x-api-key'] || req.headers['X-API-KEY'];
     if (!apiKey || apiKey !== process.env.INTERNAL_API_SECRET) {
         return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or missing X-API-KEY' });
     }
@@ -396,12 +401,31 @@ app.post('/api/verify-visit', async (req, res) => {
                 return res.json({ success: false, gemini_unavailable: true });
             }
 
+            const memory = await readUserVault(vaultUserId);
+
+            // PROACTIVE INTELLIGENCE: If specific branding is unidentifiable, check if cuisine matches any vault entries!
             if (!result.success || !result.identified || result.confidence < 0.5) {
-                return res.json({ success: false, identified: false, confidence: result.confidence || 0 });
+                const visibleCuisine = result.cuisine_visible || null;
+                let suggestedMatches = [];
+                
+                if (visibleCuisine && Array.isArray(memory.restaurants)) {
+                    suggestedMatches = memory.restaurants.filter(r => {
+                        const spotCuisine = (r.cuisine || '').toLowerCase();
+                        const queryCuisine = visibleCuisine.toLowerCase();
+                        return spotCuisine.includes(queryCuisine) || queryCuisine.includes(spotCuisine);
+                    });
+                }
+                
+                return res.json({ 
+                    success: true, 
+                    identified: false, 
+                    cuisine_visible: visibleCuisine,
+                    confidence: result.confidence || 0,
+                    suggested_matches: suggestedMatches 
+                });
             }
 
             // Fuzzy match against vault
-            const memory = await readUserVault(vaultUserId);
             const identified = result.restaurant_name.toLowerCase();
             const idx = memory.restaurants.findIndex(r => {
                 const name = (r.name || '').toLowerCase();

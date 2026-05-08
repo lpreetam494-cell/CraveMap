@@ -2,16 +2,38 @@
  * Advanced Group Consensus Engine Skill
  * Calculates Harmony and Friction metrics for Cuisine, Distance, and Budget.
  */
+const axios = require('axios');
+const { calculateTravelTime } = require('./location_service');
 
 const calculateAdvancedMetrics = (restaurant, groupPrefs) => {
     let cuisineScores = [];
     let budgetScores = [];
     let distanceScores = [];
 
-    groupPrefs.forEach(pref => {
-        // Cuisine Friction
-        const hasCuisine = restaurant.cuisine && pref.preferredCuisines.some(c => 
-            restaurant.cuisine.toLowerCase().includes(c.toLowerCase())
+const findBestRestaurant = async (payloadObj) => {
+    try {
+        console.log('📡 Calling FastAPI Social Brain microservice...');
+        
+        // Phase 4: Location Intelligence
+        // If the host has coordinates, calculate travel times for all restaurants
+        if (payloadObj.host_restaurants && payloadObj.host_restaurants.length > 0) {
+            // Mocking host origin as Central Bangalore for demo if not provided
+            const originLat = payloadObj.origin_lat || 12.9716;
+            const originLng = payloadObj.origin_lng || 77.5946;
+            
+            const travelTimes = await calculateTravelTime(originLat, originLng, payloadObj.host_restaurants);
+            
+            // Merge travel times into host_restaurants
+            payloadObj.host_restaurants = payloadObj.host_restaurants.map(r => {
+                const tt = travelTimes.find(t => t.restaurant_id === r.id);
+                return { ...r, distance_km: tt ? tt.distance_km : null, duration_mins: tt ? tt.duration_mins : null };
+            });
+        }
+
+        const response = await axios.post(
+            `${FASTAPI_ENDPOINT}/process-social-brain`,
+            payloadObj,
+            { timeout: 5000 }
         );
         cuisineScores.push(hasCuisine ? 1 : 0);
 

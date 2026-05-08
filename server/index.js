@@ -21,6 +21,15 @@ const io = require('socket.io')(http, {
 app.use(cors());
 app.use(bodyParser.json());
 
+// API Authentication Middleware
+app.use('/api', (req, res, next) => {
+    const apiKey = req.headers['x-api-key'];
+    if (!apiKey || apiKey !== process.env.INTERNAL_API_SECRET) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or missing X-API-KEY' });
+    }
+    next();
+});
+
 const MEMORY_PATH = path.join(__dirname, 'memory', 'food_memory.json');
 
 // Helper to emit agent thoughts
@@ -45,6 +54,16 @@ app.get('/api/memory', (req, res) => {
     res.json(readMemory());
 });
 
+// 1b. Get All Onboarded Users (Agents Grid)
+app.get('/api/users', async (req, res) => {
+    try {
+        const users = await listAllUsers();
+        res.json({ agents: users, count: users.length });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // 2. Save Restaurant (Social Hunter Trigger)
 app.post('/api/save', async (req, res) => {
     const { text } = req.body;
@@ -61,7 +80,18 @@ app.post('/api/save', async (req, res) => {
     
     emitThought('Social Hunter', 'EXTRACTION', `Metadata extracted: ${extracted.name}`, extracted);
     
-    const memory = readMemory();
+    const memory = await readUserVault(vaultUserId);
+    if (!memory.restaurants) memory.restaurants = [];
+    
+    // Implicit Scaling Logic
+    if (extracted.high_intent) {
+        emitThought('Memory Node', 'IMPLICIT_SCALING', `Detected high intent slang/cue. Boosting preferences.`);
+        if (memory.user_profile && extracted.cuisine) {
+            if (!memory.user_profile.boosts) memory.user_profile.boosts = [];
+            memory.user_profile.boosts.push(extracted.cuisine);
+        }
+    }
+
     const newEntry = {
         id: (memory.restaurants.length + 1).toString(),
         ...extracted,
@@ -124,6 +154,205 @@ app.post('/api/think', async (req, res) => {
     }
     
     res.json({ success: true, triggers });
+});
+
+// 5. Natural Language Vault Search
+app.post('/api/search-vault', async (req, res) => {
+    const { query, userId } = req.body;
+    emitThought('Taste Alchemist', 'SEARCH', `Querying Sovereign Vault for: "${query}"`);
+    
+    const vaultUserId = userId || 'fallback';
+    const memory = await readUserVault(vaultUserId);
+    const result = await searchVault(query, memory);
+    
+    res.json(result);
+});
+
+// 6. Phase 7: Discovery Pipeline
+app.post('/api/discover', async (req, res) => {
+    const { area, lat, lon, userId } = req.body;
+    if (!area && (!lat || !lon)) {
+        return res.status(400).json({ success: false, message: 'Provide an area name or lat/lon coordinates.' });
+    }
+
+    emitThought('Discovery Agent', 'SCOUT', `Starting discovery pipeline for "${area || `${lat},${lon}`}"...`);
+
+    const vaultUserId = userId || 'fallback';
+    const memory = await readUserVault(vaultUserId);
+    const friendVaults = {
+        'Rohan': readVault('rohan_vault.json'),
+        'Priya': readVault('priya_vault.json')
+    };
+
+    const result = await runDiscoveryPipeline(area || 'Bangalore', memory, friendVaults, lat, lon);
+
+    if (result.success) {
+        emitThought('Discovery Agent', 'COMPLETED', `Sovereign Filter returned ${result.discoveries.length} top discoveries.`);
+    } else {
+        emitThought('Discovery Agent', 'NO_MATCH', result.message);
+    }
+
+    res.json(result);
+});
+
+// 7. Save a Discovery to Vault
+app.post('/api/save-discovery', async (req, res) => {
+    const { discovery, userId } = req.body;
+    if (!discovery || !discovery.name) {
+        return res.status(400).json({ success: false, message: 'Invalid discovery data.' });
+    }
+
+    const vaultUserId = userId || 'fallback';
+    const memory = await readUserVault(vaultUserId);
+    if (!memory.restaurants) memory.restaurants = [];
+    const newEntry = {
+        id: (memory.restaurants.length + 1).toString(),
+        name: discovery.name,
+        cuisine: discovery.cuisine || null,
+        area: discovery.area || null,
+        vibe: discovery.vibe || null,
+        budget: null,
+        meal_type: null,
+        saved_at: new Date().toISOString().split('T')[0],
+        visited: false,
+        rating: null,
+        discovery: true,  // Phase 7 tag
+    };
+
+    memory.restaurants.push(newEntry);
+    writeUserVault(vaultUserId, memory);
+
+    emitThought('Memory Node', 'PERSISTENCE', `Discovery saved: ${discovery.name} (tagged discovery:true)`);
+    res.json({ success: true, entry: newEntry });
+});
+
+// 8. Phase 8: Vision-Based Visit Verification
+const TMP_DIR = path.join(__dirname, 'tmp');
+if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+
+app.post('/api/verify-visit', async (req, res) => {
+    const { imagePath, userId } = req.body;
+    if (!imagePath) return res.status(400).json({ success: false, error: 'imagePath required' });
+    
+    const vaultUserId = userId || 'fallback';
+
+    emitThought('Vision Engine', 'VERIFY', 'Running Gemini vision on photo for restaurant identification...');
+
+    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    const pythonProcess = spawn(pythonCmd, [
+        path.resolve(__dirname, 'python_services', 'visit_verifier.py')
+    ]);
+
+    let stdout = '';
+    let stderr = '';
+    pythonProcess.stdout.on('data', d => stdout += d.toString());
+    pythonProcess.stderr.on('data', d => stderr += d.toString());
+
+    pythonProcess.stdin.write(JSON.stringify({ image_path: imagePath }));
+    pythonProcess.stdin.end();
+
+    pythonProcess.on('close', async (code) => {
+        // Always clean up temp file
+        try { if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath); } catch (e) {}
+
+        try {
+            const result = JSON.parse(stdout);
+
+            if (result.error === 'GEMINI_503') {
+                return res.json({ success: false, gemini_unavailable: true });
+            }
+
+            if (!result.success || !result.identified || result.confidence < 0.5) {
+                return res.json({ success: false, identified: false, confidence: result.confidence || 0 });
+            }
+
+            // Fuzzy match against vault
+            const memory = await readUserVault(vaultUserId);
+            const identified = result.restaurant_name.toLowerCase();
+            const idx = memory.restaurants.findIndex(r => {
+                const name = (r.name || '').toLowerCase();
+                return name.includes(identified) || identified.includes(name) ||
+                       identified.split(' ').filter(w => w.length > 3).some(w => name.includes(w));
+            });
+
+            if (idx === -1) {
+                return res.json({ success: true, identified: true, restaurant_name: result.restaurant_name, matched_in_vault: false, confidence: result.confidence, cues: result.cues });
+            }
+
+            // Mark as visited + reset craving cycle
+            memory.restaurants[idx].visited = true;
+            const cuisine = memory.restaurants[idx].cuisine;
+            if (cuisine) {
+                const cuisines = cuisine.split(',').map(c => c.trim().toLowerCase());
+                if (!memory.craving_patterns) memory.craving_patterns = {};
+                cuisines.forEach(c => {
+                    memory.craving_patterns[c] = { last_satisfied: new Date().toISOString(), cooldown_days: 5 };
+                });
+            }
+            writeUserVault(vaultUserId, memory);
+            emitThought('Memory Node', 'PERSISTENCE', `Marked "${memory.restaurants[idx].name}" as visited via photo verification.`);
+
+            return res.json({ success: true, identified: true, matched_in_vault: true, restaurant: memory.restaurants[idx], confidence: result.confidence, cues: result.cues });
+        } catch (e) {
+            return res.status(500).json({ success: false, error: 'Failed to parse verifier output', raw: stdout });
+        }
+    });
+});
+
+// 9. Heartbeat (Agency Daemon — triggered from frontend)
+app.post('/api/heartbeat', async (req, res) => {
+    emitThought('Agency Daemon', 'WAKEUP', 'Heartbeat triggered from dashboard...');
+    try {
+        const memory = readVault('food_memory.json');
+        const { triggers, timeVibe } = await getProactiveTriggers(memory);
+        const penaltyMap = enforceVariety(memory.restaurants || []);
+
+        const cravings = memory.craving_patterns || {};
+        const now = new Date();
+        let nudgeReasons = [];
+        let forcedConstraints = { vetoes: [] };
+
+        // Check craving cycles
+        for (const [cuisine, data] of Object.entries(cravings)) {
+            const lastHad = new Date(data.last_satisfied || data.last_had || new Date());
+            const cycleDays = data.cooldown_days || 5;
+            const daysSince = Math.ceil((now - lastHad) / (1000 * 60 * 60 * 24));
+            if (daysSince >= cycleDays) {
+                nudgeReasons.push(`🍛 ${cuisine} craving overdue by ${daysSince - cycleDays} day(s)`);
+                if (!forcedConstraints.boosts) forcedConstraints.boosts = {};
+                forcedConstraints.boosts[cuisine] = 5.0;
+            }
+        }
+
+        // Add environmental triggers
+        triggers.forEach(t => {
+            nudgeReasons.push(t.message);
+            if (t.tags) forcedConstraints.must_include_tags = t.tags;
+        });
+
+        // Apply variety penalties
+        for (const [cuisine, penalty] of Object.entries(penaltyMap)) {
+            if (!forcedConstraints.boosts) forcedConstraints.boosts = {};
+            forcedConstraints.boosts[cuisine] = penalty;
+        }
+
+        emitThought('Agency Daemon', 'ANALYSIS', nudgeReasons.length > 0
+            ? `Found ${nudgeReasons.length} active trigger(s).`
+            : 'All cycles healthy. No intervention needed.');
+
+        return res.json({
+            success: true,
+            nudgeReasons,
+            timeVibe,
+            triggerCount: nudgeReasons.length,
+            message: nudgeReasons.length > 0
+                ? `Found ${nudgeReasons.length} active trigger(s): ${nudgeReasons.join('; ')}`
+                : 'All craving cycles healthy. No proactive nudges needed right now.'
+        });
+    } catch (err) {
+        emitThought('Agency Daemon', 'ERROR', err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 const PORT = process.env.PORT || 5001;

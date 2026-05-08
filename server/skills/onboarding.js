@@ -161,7 +161,7 @@ const handleStyle = async (ctx, style) => {
     updateUserProfile(userId, 'onboarding_complete', true);
 
     // Build a summary
-    const vault = readUserVault(userId);
+    const vault = await readUserVault(userId);
     const p = vault.user_profile;
 
     await ctx.editMessageText(

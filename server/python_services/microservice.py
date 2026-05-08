@@ -130,6 +130,15 @@ async def process_social_brain(request: SocialBrainRequest):
                 if rest_budget <= mood_modifiers['affordability_threshold']:
                     score += mood_modifiers['budget_weight']
 
+            # Distance Penalty
+            if restaurant.get('distance_km'):
+                try:
+                    dist = float(restaurant['distance_km'])
+                    if dist > 10.0:
+                        score -= (dist - 10) * 0.5 # Deduct 0.5 points for every km over 10km
+                except ValueError:
+                    pass
+
             if score > best_score:
                 best_score = score
                 best_option = restaurant

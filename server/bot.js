@@ -3,6 +3,26 @@ const axios = require('axios');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
+// Secure backend communication
+axios.interceptors.request.use(config => {
+    if (config.url && config.url.includes('localhost:5001')) {
+        config.headers['X-API-KEY'] = process.env.INTERNAL_API_SECRET;
+    }
+    return config;
+});
+
+const TMP_DIR = path.join(__dirname, 'tmp');
+if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+
+// In-memory session store for discovery data (bypass Telegram 64-byte limit)
+const discoverySessionStore = new Map();
+const makeDiscoveryKey = (spot) => {
+    const key = `d_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    discoverySessionStore.set(key, spot);
+    // Auto-expire after 30 minutes
+    setTimeout(() => discoverySessionStore.delete(key), 30 * 60 * 1000);
+    return key;
+};
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
 console.log("🤖 Sovereign Bot: Initializing...");
@@ -11,11 +31,544 @@ bot.start((ctx) => {
     ctx.reply("Welcome to CraveMap Sovereign. Send me a restaurant name, a link, or a location to save it to your food brain.");
 });
 
+bot.start(async (ctx) => {
+    saveChatId(ctx);
+    const userId = ctx.from.id;
+    try {
+        const vault = await readUserVault(userId);
+        if (!vault.user_profile || !vault.user_profile.onboarding_complete) {
+            return onboarding.startOnboarding(ctx);
+        }
+    } catch (e) {}
+
+    ctx.reply(
+        "Welcome back to *CraveMap Sovereign* 🧠\n\n" +
+        "*Commands:*\n" +
+        "/whoami — View your Food Persona\n" +
+        "/discover Koramangala — Scout new restaurants\n" +
+        "/consensus — Group decision lobby\n" +
+        "/export\\_vault — Download your data\n" +
+        "/wipe\\_memory — Nuclear wipe\n\n" +
+        "Send a photo of your meal and I will verify the visit automatically.",
+        { parse_mode: 'Markdown' }
+    );
+});
+
+// --- NEW ONBOARDING ACTIONS ---
+bot.action(/ob_diet_(veg|nonveg|vegan|egg)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const mapping = { veg: 'Vegetarian', nonveg: 'Non-Veg', vegan: 'Vegan', egg: 'Eggetarian' };
+        await onboarding.handleDietType(ctx, mapping[ctx.match[1]]);
+    } catch (e) { console.error(e); }
+});
+
+bot.action(/ob_cuisine_done/, async (ctx) => {
+    try {
+        await onboarding.handleCuisineDone(ctx);
+    } catch (e) {
+        if (e.message && e.message.includes('not modified')) return;
+        console.error(e);
+    }
+});
+
+bot.action(/ob_cuisine_(.+)/, async (ctx) => {
+    try {
+        await onboarding.handleCuisineToggle(ctx, ctx.match[1]);
+    } catch (e) {
+        if (e.message && e.message.includes('not modified')) return;
+        console.error(e);
+    }
+});
+
+bot.action(/ob_spice_(.+)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const mapping = { extreme: 'Extreme', medium: 'Medium', mild: 'Mild' };
+        await onboarding.handleSpice(ctx, mapping[ctx.match[1]]);
+    } catch (e) { console.error(e); }
+});
+
+bot.action(/ob_style_(.+)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const mapping = { explorer: 'Explorer', loyalist: 'Loyalist' };
+        await onboarding.handleStyle(ctx, mapping[ctx.match[1]]);
+    } catch (e) { console.error(e); }
+});
+
+bot.command('whoami', async (ctx) => {
+    try {
+        const userId = ctx.from.id;
+        const vault = await readUserVault(userId);
+        if (!vault.user_profile || !vault.user_profile.onboarding_complete) {
+            return ctx.reply("You haven't completed your Food DNA onboarding yet. Run /start to begin.");
+        }
+        
+        const Groq = require("groq-sdk");
+        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+        
+        const completion = await groq.chat.completions.create({
+            messages: [{
+                role: "system",
+                content: "You are a creative persona generator. Based on the user's food profile, generate a fun, creative 2-4 word title (e.g. 'The Indiranagar Spice-King', 'The Cozy Cafe Collector'). Return ONLY the title string."
+            }, {
+                role: "user",
+                content: JSON.stringify(vault.user_profile)
+            }],
+            model: "llama-3.3-70b-versatile"
+        });
+        
+        const persona = completion.choices[0].message.content.replace(/["']/g, '');
+        vault.user_profile.persona_name = persona;
+        writeUserVault(userId, vault);
+
+        const p = vault.user_profile;
+        const msg = `👑 *Your Food Persona*\n\n` +
+                    `*${persona}*\n\n` +
+                    `🍽️ *Diet:* ${p.diet_type}\n` +
+                    `🌍 *Cuisines:* ${(p.favorite_cuisines || []).join(', ')}\n` +
+                    `🌶️ *Spice:* ${p.spice_tolerance}\n` +
+                    `🧭 *Style:* ${p.eating_style}\n\n` +
+                    `_Your Sovereign Vault holds ${(vault.restaurants || []).length} saved spots._`;
+
+        ctx.reply(msg, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([[Markup.button.callback('⚠️ Reset Profile', 'reset_profile')]])
+        });
+        
+    } catch (e) {
+        ctx.reply("❌ Failed to synthesize persona: " + e.message);
+    }
+});
+
+bot.action('reset_profile', async (ctx) => {
+    ctx.answerCbQuery();
+    const userId = ctx.from.id;
+    ctx.reply("Profile reset triggered. To fully wipe your data, run /wipe_memory.");
+    try {
+        const vault = await readUserVault(userId);
+        delete vault.user_profile;
+        writeUserVault(userId, vault);
+    } catch (e) {}
+});
+
+bot.on('new_chat_members', async (ctx) => {
+    try {
+        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+        if (memory.user_profile && memory.user_profile.persona_name) {
+            ctx.reply(`🤝 *A ${memory.user_profile.persona_name} has joined the table.*\n\nSocial Taste Graph updated! We'll factor in their preferences for future group decisions.`, { parse_mode: 'Markdown' });
+        }
+    } catch (e) {}
+});
+
+// Start the Heartbeat Daemon (runs every hour)
+cron.schedule('0 * * * *', () => {
+    evaluateAndTriggerAgency(bot);
+});
+
+// In-memory store for veto context (spotId → spot data)
+const vetoSessionStore = new Map();
+
+// Component 1: The Consensus Decision Card (Phase 10: Lobby Manager)
+bot.command('consensus', async (ctx) => {
+    saveChatId(ctx);
+    await lobby_manager.startLobby(ctx);
+});
+
+bot.action('lobby_join', async (ctx) => {
+    try {
+        await lobby_manager.handleJoin(ctx);
+    } catch (e) {
+        console.error(e);
+    }
+});
+
+bot.action('lobby_finalize', async (ctx) => {
+    try {
+        await lobby_manager.handleFinalize(ctx);
+    } catch (e) {
+        console.error(e);
+    }
+});
+
+// --- INTELLIGENT VETO FLOW (Component 3) ---
+// Step 1: Show 4-reason sub-menu
+bot.action(/veto_start_(.+)/, (ctx) => {
+    ctx.answerCbQuery();
+    const vetoKey = ctx.match[1];
+    const spot = vetoSessionStore.get(vetoKey);
+    const spotName = spot?.name || 'this spot';
+    ctx.reply(
+        `🛑 Why are you vetoing *${spotName}*? This helps sharpen your recommendations.`,
+        {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('💸 Too Expensive', `vr_${vetoKey}_too_expensive`)],
+                [Markup.button.callback('📍 Too Far', `vr_${vetoKey}_too_far`)],
+                [Markup.button.callback('🙅 Not in the Mood', `vr_${vetoKey}_not_in_mood`)],
+                [Markup.button.callback('🚫 Dislike Cuisine', `vr_${vetoKey}_dislike_cuisine`)],
+            ])
+        }
+    );
+});
+
+// Step 2: Record the reason and trigger re-weighting
+const VETO_MESSAGES = {
+    too_expensive: { msg: '💸 Got it. Budget noted — I\'ll prioritize more affordable options next time.', weight: -3.0 },
+    too_far:       { msg: '📍 Proximity flagged — I\'ll factor in distance more carefully.', weight: -2.0 },
+    not_in_mood:   { msg: '🙅 Mood mismatch noted — try `/consensus` with a mood tag next time!', weight: -1.5 },
+    dislike_cuisine: { msg: '🚫 Cuisine preference updated — this cuisine will be heavily penalized next session.', weight: -4.0 },
+};
+
+bot.action(/vr_(.+)_(too_expensive|too_far|not_in_mood|dislike_cuisine)$/, async (ctx) => {
+    ctx.answerCbQuery('Feedback recorded ✅');
+    const vetoKey = `v_${ctx.match[1]}`;
+    const reason = ctx.match[2];
+    const spot = vetoSessionStore.get(vetoKey);
+    const feedback = VETO_MESSAGES[reason];
+
+    if (spot) {
+        recordNegativePreference(spot.name, spot.cuisine, reason, feedback.weight);
+        vetoSessionStore.delete(vetoKey);
+    }
+
+    await ctx.reply(feedback.msg, { parse_mode: 'Markdown' });
+
+    // Offer immediate re-calculation
+    await ctx.reply(
+        'Want me to recalculate with this feedback applied?',
+        Markup.inlineKeyboard([
+            [Markup.button.callback('🔄 Recalculate Now', 'recalculate_consensus')]
+        ])
+    );
+});
+
+bot.action('recalculate_consensus', async (ctx) => {
+    ctx.answerCbQuery();
+    await ctx.reply('🎲 Recalculating with updated preferences...');
+    try {
+        const response = await axios.post('http://localhost:5001/api/group-decision', { constraints: {} });
+        const result = response.data;
+        if (!result.best_option) return ctx.reply('❌ Still no match found. Try adding more spots to your vault!');
+        const spot = result.best_option;
+        const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spot.name + ' ' + (spot.area || ''))}`;
+        const vetoKey = `v_${spot.id || Date.now()}`;
+        vetoSessionStore.set(vetoKey, { name: spot.name, cuisine: spot.cuisine, id: spot.id });
+        setTimeout(() => vetoSessionStore.delete(vetoKey), 30 * 60 * 1000);
+        await ctx.replyWithMarkdown(
+            `🏆 *New Match!*\n📍 *${spot.name}*\n🥘 ${spot.cuisine || '?'} | ✨ ${spot.vibe || '?'}\n\n_${result.reasoning}_`,
+            Markup.inlineKeyboard([
+                [Markup.button.url('🗺️ Directions', mapsUrl)],
+                [Markup.button.callback('✅ Accept', `accept_nudge_${spot.id}`), Markup.button.callback('🛑 Veto', `veto_start_${vetoKey}`)]
+            ])
+        );
+    } catch (err) {
+        ctx.reply('❌ Failed: ' + err.message);
+    }
+});
+
+// Feedback Loop Integration
+bot.action(/accept_nudge_(.+)/, (ctx) => {
+    const spotId = ctx.match[1];
+    try {
+        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+        const spotIndex = memory.restaurants.findIndex(r => r.id === spotId);
+        
+        if (spotIndex !== -1) {
+            const spot = memory.restaurants[spotIndex];
+            memory.restaurants[spotIndex].visited = true; // Mark as visited
+            
+            // Reset craving cycle for this cuisine
+            if (spot.cuisine) {
+                const cuisines = spot.cuisine.split(',').map(c => c.trim().toLowerCase());
+                if (!memory.craving_patterns) memory.craving_patterns = {};
+                cuisines.forEach(c => {
+                    memory.craving_patterns[c] = {
+                        last_satisfied: new Date().toISOString(),
+                        cooldown_days: 5
+                    };
+                });
+            }
+            
+            fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
+            ctx.reply(`✅ *${spot.name}* has been marked as visited!\n\nYour Behavioral Taste Profile has been updated, and the ${spot.cuisine || 'food'} craving cycle has been reset.`, { parse_mode: 'Markdown' });
+        }
+    } catch (e) {
+        ctx.reply("Failed to update Behavioral Taste Profile.");
+    }
+    ctx.answerCbQuery();
+});
+
+// Component 3: Sovereign Ownership Commands
+bot.command('export_vault', (ctx) => {
+    if (fs.existsSync(MEMORY_PATH)) {
+        ctx.replyWithDocument({ source: MEMORY_PATH, filename: 'my_sovereign_vault.json' }, { caption: "🔐 Here is your completely raw, offline data. You own this." });
+    } else {
+        ctx.reply("Your vault is currently empty.");
+    }
+});
+
+bot.command('wipe_memory', (ctx) => {
+    try {
+        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+        memory.restaurants = [];
+        memory.craving_patterns = {};
+        fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
+        ctx.reply("☢️ Nuclear wipe complete. Your Sovereign Vault is now completely blank.");
+    } catch (e) {
+        ctx.reply("Failed to wipe vault.");
+    }
+});
+
+bot.command('privacy_mode', async (ctx) => {
+    try {
+        const userId = ctx.from.id;
+        const vault = await readUserVault(userId);
+        if (!vault.analytics) vault.analytics = {};
+        vault.analytics.privacy_mode = !vault.analytics.privacy_mode;
+        writeUserVault(userId, vault);
+        
+        if (vault.analytics.privacy_mode) {
+            ctx.reply("🕵️‍♂️ Privacy Mode: ON. Your data will be ignored in the next Group Consensus calculation.");
+        } else {
+            ctx.reply("🌍 Privacy Mode: OFF. Your tastes will influence the Social Taste Graph.");
+        }
+    } catch (e) {
+        ctx.reply("Failed to toggle privacy mode.");
+    }
+});
+
+// PART 3: SOVEREIGN LOCAL-FIRST ENFORCEMENT
+// Stealth Mode: Block all external API calls (Discovery, Web Search, Video Ingestion)
+bot.command('stealth_mode', async (ctx) => {
+    try {
+        const userId = ctx.from.id;
+        const vault = await readUserVault(userId);
+        if (!vault.analytics) vault.analytics = {};
+        vault.analytics.stealth_mode = !vault.analytics.stealth_mode;
+        await writeUserVault(userId, vault);
+        
+        if (vault.analytics.stealth_mode) {
+            ctx.reply(
+                `🕶️ *STEALTH MODE: ACTIVE* 🕶️\n\n` +
+                `✅ *Blocked:*\n` +
+                `• Discovery API calls (Nominatim, Google Places)\n` +
+                `• Web search (Tavily)\n` +
+                `• Social media ingestion (Instagram/TikTok)\n` +
+                `• Weather API calls\n\n` +
+                `✅ *Still Available:*\n` +
+                `• Personal vault queries\n` +
+                `• Craving cycle tracking (local)\n` +
+                `• Group consensus (peer-only)\n\n` +
+                `🔒 Your Sovereign Food Brain operates 100% offline.\n` +
+                `All computation happens on your machine.`,
+                { parse_mode: 'Markdown' }
+            );
+        } else {
+            ctx.reply(
+                `🌍 *STEALTH MODE: DEACTIVATED* 🌍\n\n` +
+                `External APIs now accessible for discovery and enrichment.`,
+                { parse_mode: 'Markdown' }
+            );
+        }
+    } catch (e) {
+        ctx.reply("Failed to toggle stealth mode.");
+    }
+});
+
+// Phase 7: Discovery Command
+const sendDiscoveryCards = async (ctx, result) => {
+    if (!result.success || !result.discoveries || result.discoveries.length === 0) {
+        return ctx.reply(result.message || "No discoveries found. Try a different area!");
+    }
+
+    await ctx.reply(`🔭 *Top ${result.discoveries.length} New Discoveries* — Ranked by your Taste Profile:`, { parse_mode: 'Markdown' });
+
+    for (const [i, spot] of result.discoveries.entries()) {
+        const label = spot.isWildcard ? '🎲 Wildcard Pick' : `#${i + 1} Best Match`;
+        const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spot.name + ' ' + spot.area)}`;
+        const sessionKey = makeDiscoveryKey(spot); // store full spot data in memory
+
+        const card = `${label}\n📍 *${spot.name}*\n🥘 ${spot.cuisine || 'Mixed'} · ✨ ${spot.vibe || 'Local gem'}\n\n_${spot.reasoning}_`;
+
+        await ctx.replyWithMarkdown(card, Markup.inlineKeyboard([
+            [Markup.button.url('🗺️ Get Directions', mapsUrl)],
+            [Markup.button.callback('💾 Save to Vault', `sdsc_${sessionKey}`)],
+        ]));
+    }
+};
+
+bot.command('discover', async (ctx) => {
+    saveChatId(ctx);
+    const text = ctx.message.text.trim();
+    const area = text.replace('/discover', '').trim();
+
+    if (!area) {
+        return ctx.reply(
+            "📍 Share your location or type an area name:\n" +
+            "Example: `/discover Koramangala` or `/discover Indiranagar`",
+            {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.callback('Use Default (Bangalore)', 'discover_bangalore')]
+                ])
+            }
+        );
+    }
+
+    await ctx.reply(`🔭 Scouting *${area}*... Applying your Sovereign Filter...`, { parse_mode: 'Markdown' });
+    try {
+        const response = await axios.post('http://localhost:5001/api/discover', { area, userId: ctx.from.id });
+        await sendDiscoveryCards(ctx, response.data);
+    } catch (err) {
+        ctx.reply('❌ Discovery failed: ' + err.message);
+    }
+});
+
+bot.action('discover_bangalore', async (ctx) => {
+    ctx.answerCbQuery();
+    saveChatId(ctx);
+    await ctx.reply('🔭 Scouting *Bangalore*...', { parse_mode: 'Markdown' });
+    try {
+        const response = await axios.post('http://localhost:5001/api/discover', { area: 'Bangalore', userId: ctx.from.id });
+        await sendDiscoveryCards(ctx, response.data);
+    } catch (err) {
+        ctx.reply('❌ Discovery failed: ' + err.message);
+    }
+});
+
+// Handle Telegram location share for GPS-precise discovery
+bot.on('location', async (ctx) => {
+    saveChatId(ctx);
+    const { latitude, longitude } = ctx.message.location;
+    await ctx.reply(`📡 Got your coordinates! Scouting nearby restaurants...`);
+    try {
+        const response = await axios.post('http://localhost:5001/api/discover', { area: 'Current Location', lat: latitude, lon: longitude, userId: ctx.from.id });
+        await sendDiscoveryCards(ctx, response.data);
+    } catch (err) {
+        ctx.reply('❌ Discovery failed: ' + err.message);
+    }
+});
+
+// Save Discovery Feedback Loop (uses in-memory session store)
+bot.action(/sdsc_(.+)/, async (ctx) => {
+    ctx.answerCbQuery('Saving to your Vault...');
+    const sessionKey = `d_${ctx.match[1].replace('d_', '')}`;
+    const spot = discoverySessionStore.get(ctx.match[1]) || discoverySessionStore.get(sessionKey);
+
+    if (!spot) {
+        return ctx.reply('⚠️ Discovery session expired. Run /discover again and save immediately.');
+    }
+
+    try {
+        await axios.post('http://localhost:5001/api/save-discovery', { discovery: spot, userId: ctx.from.id });
+        ctx.replyWithMarkdown(
+            `💾 *${spot.name}* saved to your Sovereign Vault!\n` +
+            `Tagged as \`discovery: true\` — your Taste Profile will adapt to this.`
+        );
+        discoverySessionStore.delete(ctx.match[1]); // clean up
+    } catch (e) {
+        ctx.reply('❌ Failed to save discovery: ' + e.message);
+    }
+});
+
+// Component 4: Proactive Interaction Skeleton
+bot.command('dev_trigger_agency', async (ctx) => {
+    saveChatId(ctx);
+    ctx.reply("⚙️ Simulating Heartbeat Daemon (Forcing Friday Night Conditions)...");
+    await evaluateAndTriggerAgency(bot, true);
+});
+
+// Component 2: Natural Language Vault Queries & Media Ingestion
+const rateLimiter = new Map();
+
 bot.on('text', async (ctx) => {
     const text = ctx.message.text;
-    console.log(`💬 Bot received: "${text}"`);
+    const userId = ctx.from.id;
     
-    ctx.reply("⚡ Agent Social Hunter is processing your request...");
+    // Distinguish between a URL save request and a Natural Language search
+    if (text.includes("http") || text.includes("instagram") || text.includes("tiktok")) {
+        
+        // Rate Limiter Logic (Max 1 link per 30 seconds per user)
+        const now = Date.now();
+        const userLastSent = rateLimiter.get(userId) || 0;
+        if (now - userLastSent < 30000) {
+            return ctx.reply("🛑 Please slow down! Wait 30 seconds before sending another link so my AI doesn't overload.");
+        }
+        rateLimiter.set(userId, now);
+
+        ctx.reply("⚡ Agent Social Hunter is processing your media link...");
+        try {
+            const response = await axios.post('http://localhost:5001/api/save', { text, userId: ctx.from.id }, { timeout: 60000 });
+            if (response.data.success) {
+                if (response.data.isDiscovery) {
+                    ctx.reply(response.data.message);
+                } else {
+                    const entry = response.data.entry;
+                    const mapsLink = entry.maps_url ? `\n🗺️ [Google Maps](${entry.maps_url})` : '';
+                    ctx.reply(`📍 Saved to Sovereign Bucket!\n\nName: ${entry.name}\nCuisine: ${entry.cuisine}\nArea: ${entry.area}${mapsLink}\n\nCheck your dashboard for behavioral insights.`, { parse_mode: 'Markdown' });
+                }
+            } else {
+                // Show actual error from API (Instagram auth, Gemini limits, etc.)
+                const errorMsg = response.data.message || response.data.error_msg || "Unable to process this link.";
+                ctx.reply(`⚠️ ${errorMsg}`);
+            }
+        } catch (error) {
+            console.error("❌ Instagram Processing Error:", error.message);
+            // More informative error messages
+            if (error.code === 'ECONNREFUSED') {
+                ctx.reply("❌ Backend API is unreachable. Please try again in a moment.");
+            } else if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
+                ctx.reply("⏱️ Video processing timed out. Try:\n1. A shorter video/reel\n2. Just the restaurant name\n3. A Google Maps link");
+            } else if (error.response?.status === 400) {
+                // Backend returned specific error (Instagram auth, Gemini limit, etc)
+                ctx.reply(error.response.data?.message || "🛡️ Can't process this video. Try sending the restaurant name instead!");
+            } else {
+                ctx.reply("🛡️ Video processing failed.\n\n**Alternatives:**\n📝 Send restaurant name\n🗺️ Share Google Maps link\n📸 Upload a food photo");
+            }
+        }
+    } else {
+        // Natural Language Search
+        ctx.reply(`🔍 Querying Sovereign Vault for: "${text}"...`);
+        try {
+            const response = await axios.post('http://localhost:5001/api/search-vault', { query: text, userId: ctx.from.id });
+            const { filters, results } = response.data;
+            
+            if (results.length === 0) {
+                ctx.reply(`I couldn't find anything matching those filters in your vault. Try a broader search!`);
+            } else {
+                let replyMsg = `Found ${results.length} spot(s) matching your criteria:\n\n`;
+                results.forEach((r, i) => {
+                    replyMsg += `${i+1}. **${r.name}** - ${r.area} (${r.cuisine || 'Food'})\n   _${r.vibe || 'No vibe tags'}_\n\n`;
+                });
+                ctx.replyWithMarkdown(replyMsg);
+            }
+        } catch (err) {
+            ctx.reply("❌ Search failed.");
+        }
+    }
+});
+
+// Phase 8 - Component 1: Vision-Based Visit Verification
+// Developer Note: Use mid-size photo (index 1 or 2) to stay under 2MB for Gemini Flash accuracy
+bot.on('photo', async (ctx) => {
+    saveChatId(ctx);
+
+    const photos = ctx.message.photo;
+    // Telegram sends photos in ascending size order. Pick index 1 (medium) to balance quality/size.
+    // Index 0 = thumbnail (~10-50KB), Index 1 = medium (~100-300KB), last = full res (can be 5MB+)
+    const targetPhoto = photos.length >= 2 ? photos[1] : photos[0];
+    const MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2MB limit
+
+    if (targetPhoto.file_size && targetPhoto.file_size > MAX_SIZE_BYTES) {
+        return ctx.reply(
+            '📸 Photo received, but it\'s too large for fast processing.\n' +
+            'I\'ll use a compressed version instead — analysing now...'
+        );
+    }
+
+    const processingMsg = await ctx.reply('📸 *Analysing your photo* to identify the restaurant...', { parse_mode: 'Markdown' });
 
     try {
         const response = await axios.post('http://localhost:5000/api/save', { text });

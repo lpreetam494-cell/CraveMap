@@ -4,6 +4,7 @@ import {
   Zap, TrendingUp, Wallet, MapPin, Eye,
   ArrowUpRight, Activity, Coffee, Pizza, Flame
 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 const CRAVING_ICONS = { biryani: Flame, pizza: Pizza, coffee: Coffee, breakfast: Zap };
 const CRAVING_COLORS = {
@@ -11,6 +12,13 @@ const CRAVING_COLORS = {
   pizza:   { bg: 'bg-red-50',    text: 'text-red-500',    bar: 'bg-red-400',    border: 'border-red-200' },
   coffee:  { bg: 'bg-amber-50',  text: 'text-amber-600',  bar: 'bg-amber-500',  border: 'border-amber-200' },
   breakfast: { bg: 'bg-blue-50', text: 'text-blue-600',   bar: 'bg-blue-500',   border: 'border-blue-200' },
+};
+
+const CRAVING_HEX = {
+  biryani: '#f97316',
+  pizza: '#ef4444',
+  coffee: '#f59e0b',
+  breakfast: '#3b82f6'
 };
 
 // Simulated agent thoughts for the Operations Feed
@@ -90,42 +98,31 @@ export default function Overview({ memory, loading }) {
         >
           <h3 className="font-bold text-lg mb-1">Craving Cycles</h3>
           <p className="text-[11px] text-textSub mb-5">Based on your historical patterns.</p>
-          <div className="space-y-4">
-            {Object.entries(cravings).map(([name, data]) => {
-              const colors = CRAVING_COLORS[name] || CRAVING_COLORS.biryani;
-              const Icon = CRAVING_ICONS[name] || Flame;
-              const lastHad = new Date(data.last_had);
-              const daysSince = Math.ceil((today - lastHad) / (1000 * 60 * 60 * 24));
-              const progress = Math.min((daysSince / data.avg_cycle_days) * 100, 100);
-              const overdue = daysSince >= data.avg_cycle_days;
-
-              return (
-                <div key={name}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-2">
-                      <Icon size={14} className={colors.text} />
-                      <span className="font-semibold text-sm capitalize">{name}</span>
-                    </div>
-                    {overdue ? (
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${colors.bg} ${colors.text} ${colors.border} border`}>
-                        Overdue ({daysSince}d)
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-medium text-green-600">{data.avg_cycle_days - daysSince}d left</span>
-                    )}
-                  </div>
-                  <div className="w-full bg-gray-100 rounded-full h-1.5">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${progress}%` }}
-                      transition={{ duration: 0.8, delay: 0.2 }}
-                      className={`${colors.bar} h-1.5 rounded-full`}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+            <div className="h-48 w-full mt-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={Object.entries(cravings).map(([name, data]) => {
+                  const lastHad = new Date(data.last_satisfied || data.last_had || new Date());
+                  const cycleDays = data.cooldown_days || data.avg_cycle_days || 5;
+                  const daysSince = Math.ceil((today - lastHad) / (1000 * 60 * 60 * 24));
+                  return {
+                    name: name.charAt(0).toUpperCase() + name.slice(1),
+                    Progress: Math.min((daysSince / cycleDays) * 100, 100),
+                    fill: CRAVING_HEX[name.toLowerCase()] || '#6366f1'
+                  };
+                })} layout="vertical" margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
+                  <XAxis type="number" hide domain={[0, 100]} />
+                  <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 600, fill: '#64748b' }} />
+                  <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)' }} />
+                  <Bar dataKey="Progress" radius={[0, 4, 4, 0]} barSize={16}>
+                    {
+                      Object.entries(cravings).map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={CRAVING_HEX[entry[0].toLowerCase()] || '#6366f1'} />
+                      ))
+                    }
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
         </motion.div>
       </div>
 

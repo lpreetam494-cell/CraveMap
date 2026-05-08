@@ -435,7 +435,7 @@ bot.command('discover', async (ctx) => {
 
     await ctx.reply(`🔭 Scouting *${area}*... Applying your Sovereign Filter...`, { parse_mode: 'Markdown' });
     try {
-        const response = await axios.post('http://localhost:5001/api/discover', { area });
+        const response = await axios.post('http://localhost:5001/api/discover', { area, userId: ctx.from.id });
         await sendDiscoveryCards(ctx, response.data);
     } catch (err) {
         ctx.reply('❌ Discovery failed: ' + err.message);
@@ -447,7 +447,7 @@ bot.action('discover_bangalore', async (ctx) => {
     saveChatId(ctx);
     await ctx.reply('🔭 Scouting *Bangalore*...', { parse_mode: 'Markdown' });
     try {
-        const response = await axios.post('http://localhost:5001/api/discover', { area: 'Bangalore' });
+        const response = await axios.post('http://localhost:5001/api/discover', { area: 'Bangalore', userId: ctx.from.id });
         await sendDiscoveryCards(ctx, response.data);
     } catch (err) {
         ctx.reply('❌ Discovery failed: ' + err.message);
@@ -460,7 +460,7 @@ bot.on('location', async (ctx) => {
     const { latitude, longitude } = ctx.message.location;
     await ctx.reply(`📡 Got your coordinates! Scouting nearby restaurants...`);
     try {
-        const response = await axios.post('http://localhost:5001/api/discover', { area: 'Current Location', lat: latitude, lon: longitude });
+        const response = await axios.post('http://localhost:5001/api/discover', { area: 'Current Location', lat: latitude, lon: longitude, userId: ctx.from.id });
         await sendDiscoveryCards(ctx, response.data);
     } catch (err) {
         ctx.reply('❌ Discovery failed: ' + err.message);
@@ -478,7 +478,7 @@ bot.action(/sdsc_(.+)/, async (ctx) => {
     }
 
     try {
-        await axios.post('http://localhost:5001/api/save-discovery', { discovery: spot });
+        await axios.post('http://localhost:5001/api/save-discovery', { discovery: spot, userId: ctx.from.id });
         ctx.replyWithMarkdown(
             `💾 *${spot.name}* saved to your Sovereign Vault!\n` +
             `Tagged as \`discovery: true\` — your Taste Profile will adapt to this.`
@@ -505,7 +505,7 @@ bot.on('text', async (ctx) => {
     if (text.includes("http") || text.includes("instagram") || text.includes("tiktok")) {
         ctx.reply("⚡ Agent Social Hunter is processing your media link...");
         try {
-            const response = await axios.post('http://localhost:5001/api/save', { text }, { timeout: 10000 });
+            const response = await axios.post('http://localhost:5001/api/save', { text, userId: ctx.from.id }, { timeout: 10000 });
             if (response.data.success) {
                 if (response.data.isDiscovery) {
                     ctx.reply(response.data.message);
@@ -536,7 +536,7 @@ bot.on('text', async (ctx) => {
         // Natural Language Search
         ctx.reply(`🔍 Querying Sovereign Vault for: "${text}"...`);
         try {
-            const response = await axios.post('http://localhost:5001/api/search-vault', { query: text });
+            const response = await axios.post('http://localhost:5001/api/search-vault', { query: text, userId: ctx.from.id });
             const { filters, results } = response.data;
             
             if (results.length === 0) {
@@ -583,7 +583,7 @@ bot.on('photo', async (ctx) => {
         fs.writeFileSync(tmpPath, Buffer.from(response.data));
 
         // Call verify-visit API
-        const verifyRes = await axios.post('http://localhost:5001/api/verify-visit', { imagePath: tmpPath });
+        const verifyRes = await axios.post('http://localhost:5001/api/verify-visit', { imagePath: tmpPath, userId: ctx.from.id });
         const result = verifyRes.data;
 
         if (result.gemini_unavailable) {

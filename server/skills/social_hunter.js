@@ -34,7 +34,8 @@ const extractRestaurantData = async (text) => {
             const url = urlMatch ? urlMatch[0] : text;
             
             const pyPath = path.resolve(__dirname, '..', 'python_services', 'ingestion.py');
-            const { stdout, stderr } = await execPromise(`python "${pyPath}" "${url}"`, {
+            const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+            const { stdout, stderr } = await execPromise(`${pythonCmd} "${pyPath}" "${url}"`, {
                 cwd: path.resolve(__dirname, '..', 'python_services')
             });
             

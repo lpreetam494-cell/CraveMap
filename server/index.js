@@ -45,7 +45,7 @@ const writeMemory = (data) => fs.writeFileSync(MEMORY_PATH, JSON.stringify(data,
 // --- API ROUTES ---
 
 // Import vault router for per-user vaults
-const { listAllUsers, readUserVault } = require('./skills/vault_router');
+const { listAllUsers, readUserVault, writeUserVault } = require('./skills/vault_router');
 
 // 1. Get Memory (Dashboard)
 app.get('/api/memory', (req, res) => {
@@ -64,7 +64,10 @@ app.get('/api/users', (req, res) => {
 
 // 2. Save Restaurant (Social Hunter Trigger)
 app.post('/api/save', async (req, res) => {
-    const { text } = req.body;
+    const { text, userId } = req.body;
+    
+    // If no userId provided, default to legacy fallback (for direct curl tests)
+    const vaultUserId = userId || 'fallback';
     
     emitThought('Social Hunter', 'DISCOVERY', 'Processing raw input from Telegram...', { text });
     
@@ -88,7 +91,8 @@ app.post('/api/save', async (req, res) => {
     
     emitThought('Social Hunter', 'EXTRACTION', `Metadata extracted: ${extracted.name}`, extracted);
     
-    const memory = readMemory();
+    const memory = readUserVault(vaultUserId);
+    if (!memory.restaurants) memory.restaurants = [];
     
     // Implicit Scaling Logic
     if (extracted.high_intent) {
@@ -110,7 +114,7 @@ app.post('/api/save', async (req, res) => {
     };
     
     memory.restaurants.push(newEntry);
-    writeMemory(memory);
+    writeUserVault(vaultUserId, memory);
     
     emitThought('Memory Node', 'PERSISTENCE', `Committed ${extracted.name} to sovereign food brain.`);
     
@@ -245,10 +249,11 @@ app.post('/api/think', async (req, res) => {
 
 // 5. Natural Language Vault Search
 app.post('/api/search-vault', async (req, res) => {
-    const { query } = req.body;
+    const { query, userId } = req.body;
     emitThought('Taste Alchemist', 'SEARCH', `Querying Sovereign Vault for: "${query}"`);
     
-    const memory = readVault('food_memory.json');
+    const vaultUserId = userId || 'fallback';
+    const memory = readUserVault(vaultUserId);
     const result = await searchVault(query, memory);
     
     res.json(result);
@@ -256,14 +261,15 @@ app.post('/api/search-vault', async (req, res) => {
 
 // 6. Phase 7: Discovery Pipeline
 app.post('/api/discover', async (req, res) => {
-    const { area, lat, lon } = req.body;
+    const { area, lat, lon, userId } = req.body;
     if (!area && (!lat || !lon)) {
         return res.status(400).json({ success: false, message: 'Provide an area name or lat/lon coordinates.' });
     }
 
     emitThought('Discovery Agent', 'SCOUT', `Starting discovery pipeline for "${area || `${lat},${lon}`}"...`);
 
-    const memory = readVault('food_memory.json');
+    const vaultUserId = userId || 'fallback';
+    const memory = readUserVault(vaultUserId);
     const friendVaults = {
         'Rohan': readVault('rohan_vault.json'),
         'Priya': readVault('priya_vault.json')
@@ -282,12 +288,14 @@ app.post('/api/discover', async (req, res) => {
 
 // 7. Save a Discovery to Vault
 app.post('/api/save-discovery', (req, res) => {
-    const { discovery } = req.body;
+    const { discovery, userId } = req.body;
     if (!discovery || !discovery.name) {
         return res.status(400).json({ success: false, message: 'Invalid discovery data.' });
     }
 
-    const memory = readVault('food_memory.json');
+    const vaultUserId = userId || 'fallback';
+    const memory = readUserVault(vaultUserId);
+    if (!memory.restaurants) memory.restaurants = [];
     const newEntry = {
         id: (memory.restaurants.length + 1).toString(),
         name: discovery.name,
@@ -303,7 +311,7 @@ app.post('/api/save-discovery', (req, res) => {
     };
 
     memory.restaurants.push(newEntry);
-    writeMemory(memory);
+    writeUserVault(vaultUserId, memory);
 
     emitThought('Memory Node', 'PERSISTENCE', `Discovery saved: ${discovery.name} (tagged discovery:true)`);
     res.json({ success: true, entry: newEntry });
@@ -314,12 +322,15 @@ const TMP_DIR = path.join(__dirname, 'tmp');
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
 app.post('/api/verify-visit', async (req, res) => {
-    const { imagePath } = req.body;
+    const { imagePath, userId } = req.body;
     if (!imagePath) return res.status(400).json({ success: false, error: 'imagePath required' });
+    
+    const vaultUserId = userId || 'fallback';
 
     emitThought('Vision Engine', 'VERIFY', 'Running Gemini vision on photo for restaurant identification...');
 
-    const pythonProcess = spawn('python3', [
+    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    const pythonProcess = spawn(pythonCmd, [
         path.resolve(__dirname, 'python_services', 'visit_verifier.py')
     ]);
 
@@ -347,7 +358,7 @@ app.post('/api/verify-visit', async (req, res) => {
             }
 
             // Fuzzy match against vault
-            const memory = readVault('food_memory.json');
+            const memory = readUserVault(vaultUserId);
             const identified = result.restaurant_name.toLowerCase();
             const idx = memory.restaurants.findIndex(r => {
                 const name = (r.name || '').toLowerCase();
@@ -369,7 +380,7 @@ app.post('/api/verify-visit', async (req, res) => {
                     memory.craving_patterns[c] = { last_satisfied: new Date().toISOString(), cooldown_days: 5 };
                 });
             }
-            writeMemory(memory);
+            writeUserVault(vaultUserId, memory);
             emitThought('Memory Node', 'PERSISTENCE', `Marked "${memory.restaurants[idx].name}" as visited via photo verification.`);
 
             return res.json({ success: true, identified: true, matched_in_vault: true, restaurant: memory.restaurants[idx], confidence: result.confidence, cues: result.cues });

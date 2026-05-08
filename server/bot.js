@@ -57,22 +57,31 @@ bot.use((ctx, next) => {
 bot.start(async (ctx) => {
     saveChatId(ctx);
     const userId = ctx.from.id;
+    let name = "Foodie";
     try {
         const vault = await readUserVault(userId);
         if (!vault.user_profile || !vault.user_profile.onboarding_complete) {
+            // Check if name is already populated (e.g. from a wiped vault profile)
+            if (vault.user_profile && vault.user_profile.name && !vault.user_profile.awaiting_name_input) {
+                const onboarding = require('./skills/onboarding');
+                return onboarding.askDietType(ctx, vault.user_profile.name);
+            }
             return onboarding.startOnboarding(ctx);
+        }
+        if (vault.user_profile.name) {
+            name = vault.user_profile.name;
         }
     } catch (e) {}
 
     ctx.reply(
-        "Welcome back to *CraveMap Sovereign* 🧠\n\n" +
-        "*Commands:*\n" +
-        "/whoami — View your Food Persona\n" +
-        "/discover Koramangala — Scout new restaurants\n" +
-        "/consensus — Group decision lobby\n" +
-        "/export\\_vault — Download your data\n" +
-        "/wipe\\_memory — Nuclear wipe\n\n" +
-        "Send a photo of your meal and I will verify the visit automatically.",
+        `Welcome back, *${name}* to *CraveMap Sovereign* 🧠\n\n` +
+        `*Commands:*\n` +
+        `/whoami — View your Food Persona\n` +
+        `/discover Koramangala — Scout new restaurants\n` +
+        `/consensus — Group decision lobby\n` +
+        `/export\\_vault — Download your data\n` +
+        `/wipe\\_memory — Nuclear wipe\n\n` +
+        `Send a photo of your meal and I will verify the visit automatically.`,
         { parse_mode: 'Markdown' }
     );
 });
@@ -389,13 +398,34 @@ bot.command('export_vault', (ctx) => {
 bot.command('wipe_memory', async (ctx) => {
     try {
         const userId = ctx.from.id;
-        const { getVaultPath } = require('./skills/vault_router');
+        const { getVaultPath, readUserVault, writeUserVault } = require('./skills/vault_router');
         const userVaultPath = getVaultPath(userId);
+        
         if (fs.existsSync(userVaultPath)) {
-            fs.unlinkSync(userVaultPath);
-            ctx.reply("☢️ Nuclear wipe complete. Your Sovereign Vault is now completely deleted and reset.");
+            const vault = await readUserVault(userId);
+            const name = vault.user_profile?.name || "Preetam";
+            
+            // Keep identity, reset onboarding and clean restaurants list
+            vault.user_profile = {
+                telegram_id: userId,
+                telegram_username: ctx.from?.username || 'Unknown',
+                name: name,
+                onboarded_at: new Date().toISOString(),
+                awaiting_name_input: false, // Don't ask them to re-type their name
+                onboarding_complete: false
+            };
+            
+            vault.restaurants = [];
+            vault.craving_patterns = {};
+            vault.social_graph = {};
+            vault.visit_history = [];
+            vault.analytics = {};
+            vault.negative_preferences = [];
+            
+            await writeUserVault(userId, vault);
+            ctx.reply(`☢️ Nuclear wipe complete. Your Sovereign Vault data has been wiped, but your profile name (*${name}*) is preserved.\n\nType /start to complete onboarding!`, { parse_mode: 'Markdown' });
         } else {
-            ctx.reply("You do not have an active Sovereign Vault to delete.");
+            ctx.reply("You do not have an active Sovereign Vault to wipe.");
         }
     } catch (e) {
         ctx.reply("Failed to wipe vault.");

@@ -3,6 +3,11 @@
 
 Built for the **OpenClaw Hackathon (SRI-B)**.
 
+## 🏆 Hackathon Deliverables
+* 🎥 **[Demo Video]**(https://drive.google.com/file/d/1Ss2ewbnKvxpF1mWKK9G7tppZnbZOnD0H/view?usp=share_link)
+* 📊 **[Pitch Deck (PPT)]**(https://docs.google.com/presentation/d/1SXqAJz16rSSHDPrJnFuVk6eR4O2a1V7s/edit?usp=share_link&ouid=112066600456945679222&rtpof=true&sd=true)
+* 📝 **[AI Disclosure Form]**(https://docs.google.com/document/d/1m3gOn9kXvnv6nVWyuzBgIr6jbdx4Bc3J/edit?usp=share_link&ouid=112066600456945679222&rtpof=true&sd=true)
+
 ---
 
 ## 🌟 The Vision

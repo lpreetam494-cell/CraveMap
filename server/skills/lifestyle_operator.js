@@ -1,61 +1,62 @@
 /**
  * Lifestyle Operator Agent Skill
- * Handles actions, triggers, and communication.
+ * Handles actions, triggers, communication, and environmental context.
  */
+const { getAmbientContext } = require('./weather_service');
 
-const getProactiveTriggers = (memory, weather) => {
+const getProactiveTriggers = async (memory) => {
+    const weather = await getAmbientContext('Bangalore'); // Defaulting to Bangalore for demo
     const triggers = [];
     const now = new Date();
     const hour = now.getHours();
-
-    // 1. Weather Trigger: Rainy Day Ramen
-    if (weather.condition === 'Rain') {
+    
+    // 1. Weather Trigger: Rainy/Cold Day Comfort
+    if (weather.condition.toLowerCase().includes('rain') || weather.temp < 20) {
         triggers.push({
             type: 'CONTEXT_SYNC',
-            title: 'Rainy Day Ramen',
-            message: `It's raining in ${weather.city}. Perfect conditions for Ramen.`,
-            action: 'View 3 nearby matches'
+            title: 'Cozy Weather',
+            message: `It's currently ${weather.temp}°C and ${weather.condition} outside. Prioritizing warm and cozy spots.`,
+            tags: ['soup', 'ramen', 'cozy', 'warm', 'cafe']
         });
     }
 
-    // 2. Mealtime Reminders
-    if (hour === 11 || hour === 12) {
+    // 2. Time-of-Day Logic
+    let timeVibe = 'any';
+    if (now.getDay() === 5 && hour >= 17) {
+        timeVibe = 'friday_night';
         triggers.push({
-            type: 'MEALTIME',
-            message: "It's almost lunch! Ready to hit one of your saved spots?",
-            action: 'SHOW_RECOMMENDATION'
+            type: 'TIME_CONTEXT',
+            message: "It's Friday night! Suggesting lively places, breweries, or nice dinners.",
+            tags: ['lively', 'brewery', 'date', 'rooftop', 'weekend']
         });
-    } else if (hour === 19 || hour === 20) {
+    } else if (hour >= 11 && hour <= 14) {
+        timeVibe = 'quick_lunch';
         triggers.push({
-            type: 'MEALTIME',
-            message: "Dinner time. You have 3 unvisited spots nearby.",
-            action: 'SHOW_RECOMMENDATION'
+            type: 'TIME_CONTEXT',
+            message: "Workday lunch. Suggesting quick and budget-friendly spots.",
+            tags: ['quick', 'casual', 'budget', 'lunch']
         });
     }
 
-    // 2. Craving Alerts (Cross-Temporal)
-    const biryani = memory.craving_patterns.biryani;
-    const lastHad = new Date(biryani.last_had);
-    const diff = Math.ceil((now - lastHad) / (1000 * 60 * 60 * 24));
+    return { weather, triggers, timeVibe };
+};
+
+const enforceVariety = (restaurants) => {
+    // Look at the last 3 visited spots
+    const visited = restaurants.filter(r => r.visited).sort((a, b) => new Date(b.saved_at) - new Date(a.saved_at)).slice(0, 3);
     
-    if (diff > biryani.avg_cycle_days) {
-        triggers.push({
-            type: 'CRAVING',
-            message: `🔥 You haven't had Biryani in ${diff} days. The cycle is broken!`,
-            action: 'SUGGEST_CUISINE',
-            cuisine: 'Biryani'
-        });
+    const penaltyMap = {};
+    
+    // If the last 3 visited spots all have the same cuisine, apply a heavy penalty
+    if (visited.length >= 3) {
+        const cuisines = visited.map(r => r.cuisine?.toLowerCase()).filter(Boolean);
+        const allSame = cuisines.every(c => c === cuisines[0]);
+        if (allSame && cuisines[0]) {
+            penaltyMap[cuisines[0]] = -2.0; // Penalty multiplier for Taste Fatigue
+        }
     }
-
-    return triggers;
+    
+    return penaltyMap;
 };
 
-const draftGroupPoll = (options) => {
-    return {
-        text: "Dinner tonight? Vote for your spot!",
-        options: options.map(o => o.name),
-        metadata: { type: 'poll', source: 'CraveMap' }
-    };
-};
-
-module.exports = { getProactiveTriggers, draftGroupPoll };
+module.exports = { getProactiveTriggers, enforceVariety };

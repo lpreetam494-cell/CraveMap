@@ -1,6 +1,14 @@
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const axios = require('axios');
 const path = require('path');
+const fs = require('fs');
+const cron = require('node-cron');
+const { evaluateAndTriggerAgency } = require('./skills/agency_daemon');
+const { resolveMood, MOOD_PROFILES } = require('./skills/mood_profiles');
+const { recordNegativePreference } = require('./skills/reweight_engine');
+const onboarding = require('./skills/onboarding');
+const lobby_manager = require('./skills/lobby_manager');
+const { readUserVault, writeUserVault } = require('./skills/vault_router');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 // Secure backend communication
@@ -24,11 +32,26 @@ const makeDiscoveryKey = (spot) => {
     return key;
 };
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+const MEMORY_PATH = path.join(__dirname, 'memory', 'food_memory.json');
 
-console.log("🤖 Sovereign Bot: Initializing...");
+console.log("🤖 Sovereign Bot: Initializing Phase 8 Behavioral Feedback...");
 
-bot.start((ctx) => {
-    ctx.reply("Welcome to CraveMap Sovereign. Send me a restaurant name, a link, or a location to save it to your food brain.");
+// Utility to save chat ID
+const saveChatId = (ctx) => {
+    try {
+        if (!fs.existsSync(MEMORY_PATH)) return;
+        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+        if (!memory.analytics) memory.analytics = {};
+        if (memory.analytics.telegram_chat_id !== ctx.chat.id) {
+            memory.analytics.telegram_chat_id = ctx.chat.id;
+            fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
+        }
+    } catch (e) {}
+};
+
+bot.use((ctx, next) => {
+    console.log("➡️ Received Update:", ctx.updateType, ctx.message?.text);
+    return next();
 });
 
 bot.start(async (ctx) => {
@@ -484,6 +507,7 @@ bot.command('dev_trigger_agency', async (ctx) => {
 const rateLimiter = new Map();
 
 bot.on('text', async (ctx) => {
+    saveChatId(ctx);
     const text = ctx.message.text;
     const userId = ctx.from.id;
     
@@ -571,20 +595,60 @@ bot.on('photo', async (ctx) => {
     const processingMsg = await ctx.reply('📸 *Analysing your photo* to identify the restaurant...', { parse_mode: 'Markdown' });
 
     try {
-        const response = await axios.post('http://localhost:5000/api/save', { text });
-        
-        if (response.data.success) {
-            const entry = response.data.entry;
-            ctx.reply(`📍 Saved to Sovereign Bucket!\n\nName: ${entry.name}\nCuisine: ${entry.cuisine}\nArea: ${entry.area}\n\nCheck your dashboard for behavioral insights.`);
-        } else {
-            ctx.reply(`🤔 ${response.data.message}`);
+        // Download photo from Telegram
+        const fileLink = await ctx.telegram.getFileLink(targetPhoto.file_id);
+        const tmpPath = path.join(TMP_DIR, `verify_${Date.now()}.jpg`);
+
+        const response = await axios.get(fileLink.href, { responseType: 'arraybuffer' });
+        fs.writeFileSync(tmpPath, Buffer.from(response.data));
+
+        // Call verify-visit API
+        const verifyRes = await axios.post('http://localhost:5001/api/verify-visit', { imagePath: tmpPath, userId: ctx.from.id });
+        const result = verifyRes.data;
+
+        if (result.gemini_unavailable) {
+            // Graceful fallback: offer manual confirmation
+            return ctx.reply(
+                '⚠️ *Vision engine is temporarily busy.* Want to mark a visit manually?\n\nReply with the restaurant name and I\'ll update your vault.',
+                { parse_mode: 'Markdown' }
+            );
         }
-    } catch (error) {
-        console.error("❌ Bot Error:", error.message);
-        ctx.reply("📍 I've saved this offline! It will sync to your Sovereign Food Brain shortly.");
+
+        if (!result.success || !result.identified) {
+            return ctx.reply(
+                `🤔 I couldn't confidently identify a restaurant from this photo (confidence: ${Math.round((result.confidence || 0) * 100)}%).\n\n` +
+                `Try a clearer shot of the signage, menu, or food. Or type the restaurant name to save manually.`
+            );
+        }
+
+        if (!result.matched_in_vault) {
+            // Identified but not in vault — offer to save as new discovery
+            return ctx.replyWithMarkdown(
+                `👀 I think this is *${result.restaurant_name}* (${Math.round(result.confidence * 100)}% confident).\n\n` +
+                `_${result.cues}_\n\n` +
+                `This spot isn't in your vault yet. Want to save it?`,
+                Markup.inlineKeyboard([[
+                    Markup.button.callback(`💾 Save ${result.restaurant_name}`, `sdsc_new_${Buffer.from(result.restaurant_name).toString('base64').slice(0, 20)}`)
+                ]])
+            );
+        }
+
+        // Matched and marked visited ✅
+        const spot = result.restaurant;
+        return ctx.replyWithMarkdown(
+            `✅ *Visit Verified!*\n\n` +
+            `📍 *${spot.name}* has been marked as visited in your vault.\n` +
+            `🥘 ${spot.cuisine || 'Unknown cuisine'}\n\n` +
+            `_Visual cues: ${result.cues}_\n\n` +
+            `Your Craving Cycle timer for this cuisine has been reset. 🔄`
+        );
+
+    } catch (err) {
+        ctx.reply('❌ Photo verification failed: ' + err.message);
     }
 });
 
+console.log("REACHED BOT.LAUNCH");
 bot.launch()
     .then(() => console.log("🚀 Sovereign Bot is LIVE on Telegram"))
     .catch((err) => console.error("❌ Bot failed to launch:", err.message));

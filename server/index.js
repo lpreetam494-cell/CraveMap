@@ -456,14 +456,14 @@ app.post('/api/heartbeat', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5001;
-const HOST = '127.0.0.1';  // PART 3: LOCAL-FIRST ENFORCEMENT - Bind to localhost only
+const HOST = '0.0.0.0';  // Bind to all interfaces so local network devices like iOS can access
 
 http.listen(PORT, HOST, () => {
     console.log(`\n${'='*60}`);
     console.log(`  🧠 CraveMap Brain (Express API)`);
     console.log(`${'='*60}`);
-    console.log(`  🔒 Binding to: ${HOST}:${PORT} (LOCAL ONLY)`);
-    console.log(`  📍 Sovereign Food Vault: Accessible only from this machine`);
-    console.log(`  🚀 Bot & Dashboard: Use localhost:${PORT}`);
+    console.log(`  🔒 Binding to: ${HOST}:${PORT} (All Interfaces)`);
+    console.log(`  📍 Sovereign Food Vault: Accessible on local network`);
+    console.log(`  🚀 Bot & Dashboard: Use local-ip:${PORT}`);
     console.log(`${'='*60}\n`);
 });

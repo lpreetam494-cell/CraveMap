@@ -9,7 +9,7 @@ import FoodVault from './components/FoodVault';
 import SocialGraph from './components/SocialGraph';
 import AgentGrid from './components/AgentGrid';
 
-const API_BASE = 'http://localhost:5001';
+const API_BASE = `http://${window.location.hostname}:5001`;
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },

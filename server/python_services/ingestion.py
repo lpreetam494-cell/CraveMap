@@ -17,17 +17,8 @@ class FoodIntel(BaseModel):
     confidence_score: float = Field(description="Confidence score from 0.0 to 1.0")
 
 def ingest_reel(url: str) -> dict:
-    # For Instagram - special handling since it requires authentication
-    if "instagram.com" in url:
-        print("📸 Instagram detected - extracting URL context for Gemini...")
-        return {
-            "video_file": None,
-            "caption_text": "",
-            "title": "",
-            "uploader": "",
-            "instagram_url": url,
-            "instagram_mode": True
-        }
+    # Instagram and other platforms will now use yt-dlp. 
+    # Make sure to provide a cookies.txt file for Instagram!
     
     # For other platforms (TikTok, YouTube), use yt-dlp
     video_id = str(uuid.uuid4())
@@ -111,48 +102,6 @@ def extract_food_intel(video_file: str, caption_text: str, title: str = "", uplo
     client = genai.Client(api_key=api_key)
     
     try:
-        # SPECIAL CASE: Instagram URL without video access
-        if instagram_mode and instagram_url:
-            print("🧠 Analyzing Instagram reel with Gemini AI...")
-            
-            prompt = f"""
-            Analyze this Instagram reel URL to extract restaurant details.
-            URL: {instagram_url}
-            
-            Based on Instagram reel patterns and URL structure, extract restaurant information:
-            - Restaurant name (look for mentions, hashtags, or common patterns)
-            - Cuisine type (from context clues)
-            - Location/area (Bangalore area preferred)
-            - Price level (estimate from typical food content)
-            - Vibe/atmosphere description
-            
-            If you cannot extract clear restaurant data, return confidence_score as 0.0 and restaurant_name as "Unknown".
-            
-            IMPORTANT: Only extract information if you can reasonably infer it. Return JSON with these exact fields:
-            {{
-                "restaurant_name": "...",
-                "cuisine": "...",
-                "area_location": "...",
-                "budget_rating": "...",
-                "vibe_tags": "...",
-                "confidence_score": 0.0-1.0
-            }}
-            """
-            
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=FoodIntel,
-                    temperature=0.3,
-                ),
-            )
-            
-            result = json.loads(response.text)
-            print(f"✅ Gemini extraction complete. Confidence: {result.get('confidence_score', 0)}")
-            return result
-        
         # VIDEO FILE ANALYSIS
         if video_file and os.path.exists(video_file):
             print("🎬 Sending video to Gemini for analysis...")
@@ -242,11 +191,9 @@ if __name__ == "__main__":
     caption_text = ingest_data.get("caption_text", "")
     title = ingest_data.get("title", "")
     uploader = ingest_data.get("uploader", "")
-    instagram_url = ingest_data.get("instagram_url", "")
-    instagram_mode = ingest_data.get("instagram_mode", False)
     
     # 2. Extract Intel using Gemini
-    intel = extract_food_intel(video_file, caption_text, title, uploader, instagram_url, instagram_mode)
+    intel = extract_food_intel(video_file, caption_text, title, uploader)
     
     # 3. Clean up local file if it exists
     try:

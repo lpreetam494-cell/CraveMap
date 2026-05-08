@@ -185,11 +185,76 @@ bot.action(/add_search_spot_(.+)/, async (ctx) => {
         );
         
         discoverySessionStore.delete(sessionKey);
+        
+        // Dynamic prompt for who recommended this spot
+        await promptRecommender(ctx, newEntry.id, spotObj.name, userId);
+        
     } catch (e) {
         console.error("Error saving search spot:", e.message);
         ctx.reply("❌ Failed to save the spot. Please try again.");
     }
 });
+
+// --- SOCIAL RECOMMENDER ATTACHMENT ---
+const promptRecommender = async (ctx, restaurantId, restaurantName, userId) => {
+    try {
+        const { listAllUsers } = require('./skills/vault_router');
+        const allUsers = await listAllUsers();
+        
+        // Filter out current user and invalid names
+        const friends = allUsers.filter(u => u.userId !== userId.toString() && u.profile.name && u.profile.name !== "No Name");
+        
+        const buttons = [];
+        // Dynamic peer options from the server circle!
+        friends.forEach(f => {
+            buttons.push([Markup.button.callback(`⚡ Recommended by ${f.profile.name}`, `set_recommender_${restaurantId}_${f.profile.name}`)]);
+        });
+        
+        // Default options
+        buttons.push([Markup.button.callback('👤 Found it myself (Myself)', `set_recommender_${restaurantId}_Myself`)]);
+        buttons.push([Markup.button.callback('👥 Another Friend', `set_recommender_${restaurantId}_Friend`)]);
+        
+        await ctx.reply(
+            `❓ *Who recommended "${restaurantName}" to you?*\n` +
+            `This maps your social trust circle on your CraveMap dashboard topology!`,
+            {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard(buttons)
+            }
+        );
+    } catch (err) {
+        console.error("Error prompting recommender:", err.message);
+    }
+};
+
+bot.action(/set_recommender_(rest_[0-9]+|[0-9]+)_(.+)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery('Saving trust...');
+        const restaurantId = ctx.match[1];
+        const recommender = ctx.match[2];
+        const userId = ctx.from.id;
+        
+        const { readUserVault, writeUserVault } = require('./skills/vault_router');
+        const vault = await readUserVault(userId);
+        
+        const spot = (vault.restaurants || []).find(r => r.id === restaurantId);
+        if (spot) {
+            spot.source = (recommender === 'Myself' ? 'none' : recommender);
+            await writeUserVault(userId, vault);
+            
+            await ctx.editMessageText(
+                `🤝 *Trust Connection Registered!* \n\n` +
+                `📍 **${spot.name}** is now linked to **${recommender === 'Myself' ? 'your own discovery' : recommender}** in your social taste vault.\n` +
+                `Watch this trust link light up in your Social Taste Graph!`,
+                { parse_mode: 'Markdown' }
+            );
+        } else {
+            ctx.reply("❌ Unable to update (restaurant spot not found in your vault).");
+        }
+    } catch (err) {
+        console.error("Error setting recommender:", err.message);
+    }
+};
 
 // --- NEW ONBOARDING ACTIONS ---
 bot.action(/ob_diet_(veg|nonveg|vegan|egg)/, async (ctx) => {
@@ -767,7 +832,10 @@ bot.on('text', async (ctx) => {
                 } else {
                     const entry = response.data.entry;
                     const mapsLink = entry.maps_url ? `\n🗺️ [Google Maps](${entry.maps_url})` : '';
-                    ctx.reply(`📍 Saved to Sovereign Bucket!\n\nName: ${entry.name}\nCuisine: ${entry.cuisine}\nArea: ${entry.area}${mapsLink}\n\nCheck your dashboard for behavioral insights.`, { parse_mode: 'Markdown' });
+                    await ctx.reply(`📍 Saved to Sovereign Bucket!\n\nName: ${entry.name}\nCuisine: ${entry.cuisine}\nArea: ${entry.area}${mapsLink}\n\nCheck your dashboard for behavioral insights.`, { parse_mode: 'Markdown' });
+                    
+                    // Trigger dynamic recommender prompt!
+                    await promptRecommender(ctx, entry.id, entry.name, userId);
                 }
             } else {
                 // Show actual error from API (Instagram auth, Gemini limits, etc.)
@@ -776,13 +844,11 @@ bot.on('text', async (ctx) => {
             }
         } catch (error) {
             console.error("❌ Instagram Processing Error:", error.message);
-            // More informative error messages
             if (error.code === 'ECONNREFUSED') {
                 ctx.reply("❌ Backend API is unreachable. Please try again in a moment.");
             } else if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
                 ctx.reply("⏱️ Video processing timed out. Try:\n1. A shorter video/reel\n2. Just the restaurant name\n3. A Google Maps link");
             } else if (error.response?.status === 400) {
-                // Backend returned specific error (Instagram auth, Gemini limit, etc)
                 ctx.reply(error.response.data?.message || "🛡️ Can't process this video. Try sending the restaurant name instead!");
             } else {
                 ctx.reply("🛡️ Video processing failed.\n\n**Alternatives:**\n📝 Send restaurant name\n🗺️ Share Google Maps link\n📸 Upload a food photo");

@@ -32,21 +32,34 @@ const makeDiscoveryKey = (spot) => {
     return key;
 };
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
-const MEMORY_PATH = path.join(__dirname, 'memory', 'food_memory.json');
+// Dynamic vault path helper — no hardcoded food_memory.json
+const { readUserVault: _readVault, writeUserVault: _writeVault } = require('./skills/vault_router');
 
 console.log("🤖 Sovereign Bot: Initializing Phase 8 Behavioral Feedback...");
 
-// Utility to save chat ID
-const saveChatId = (ctx) => {
+// Utility to save chat ID to the user's own vault
+const saveChatId = async (ctx) => {
     try {
-        if (!fs.existsSync(MEMORY_PATH)) return;
-        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+        const userId = ctx.from?.id;
+        if (!userId) return;
+        const memory = await _readVault(userId);
+        if (!memory) return;
         if (!memory.analytics) memory.analytics = {};
         if (memory.analytics.telegram_chat_id !== ctx.chat.id) {
             memory.analytics.telegram_chat_id = ctx.chat.id;
-            fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
+            await _writeVault(userId, memory);
         }
     } catch (e) {}
+};
+
+// Helper to resolve city from a user's vault profile (fallback: 'Bangalore')
+const getUserCity = async (userId) => {
+    try {
+        const vault = await _readVault(userId);
+        return vault?.user_profile?.city || 'Bangalore';
+    } catch (e) {
+        return 'Bangalore';
+    }
 };
 
 bot.use((ctx, next) => {
@@ -748,12 +761,13 @@ bot.on('text', async (ctx) => {
                 ctx.reply(`⚠️ No matching spots found in your local vault.\n\n🛰️ *Safety Net:* Triggering Web Search Scout to find "${text}" on the live web...`);
                 
                 const { resolveGeocoordinates } = require('./skills/location_service');
-                const geoSpot = await resolveGeocoordinates(text, 'Bangalore');
+                const userCity = await getUserCity(ctx.from.id);
+                const geoSpot = await resolveGeocoordinates(text, userCity);
                 
                 if (geoSpot && geoSpot.lat && geoSpot.lng) {
                     const spotObj = {
                         name: text,
-                        formatted_address: geoSpot.formatted_address || `${text}, Bangalore`,
+                        formatted_address: geoSpot.formatted_address || `${text}, ${userCity}`,
                         lat: geoSpot.lat,
                         lng: geoSpot.lng,
                         maps_url: geoSpot.maps_url,

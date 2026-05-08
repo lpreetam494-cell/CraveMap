@@ -5,7 +5,8 @@
 const { getAmbientContext } = require('./weather_service');
 
 const getProactiveTriggers = async (memory) => {
-    const weather = await getAmbientContext('Bangalore'); // Defaulting to Bangalore for demo
+    const city = memory?.user_profile?.city || 'Bangalore';
+    const weather = await getAmbientContext(city);
     const triggers = [];
     const now = new Date();
     const hour = now.getHours();

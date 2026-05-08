@@ -47,7 +47,10 @@ export default function Overview({ memory, loading }) {
     try {
       const res = await fetch(`http://${window.location.hostname}:5001/api/group-decision`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-API-KEY': import.meta.env.VITE_API_KEY
+        },
         body: JSON.stringify({ constraints: {} })
       });
       const data = await res.json();
@@ -66,7 +69,13 @@ export default function Overview({ memory, loading }) {
     setHeartbeatLoading(true);
     setHeartbeatResult(null);
     try {
-      const res = await fetch(`http://${window.location.hostname}:5001/api/heartbeat`, { method: 'POST' });
+      const res = await fetch(`http://${window.location.hostname}:5001/api/heartbeat`, { 
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-KEY': import.meta.env.VITE_API_KEY
+        }
+      });
       const data = await res.json();
       setHeartbeatResult({ ok: data.success, text: data.message });
     } catch (e) {

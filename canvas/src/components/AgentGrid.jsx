@@ -18,7 +18,12 @@ export default function AgentGrid() {
   const [loading, setLoading] = useState(true);
 
   const fetchAgents = () => {
-    fetch(`${API_BASE}/api/users`)
+    fetch(`${API_BASE}/api/users`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-KEY': import.meta.env.VITE_API_KEY
+      }
+    })
       .then(res => res.json())
       .then(data => { setAgents(data.agents || []); setLoading(false); })
       .catch(() => setLoading(false));

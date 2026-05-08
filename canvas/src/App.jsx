@@ -32,14 +32,24 @@ export default function App() {
     const url = selectedUser 
       ? `${API_BASE}/api/memory?userId=${selectedUser}`
       : `${API_BASE}/api/memory`;
-    fetch(url)
+    fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-KEY': import.meta.env.VITE_API_KEY
+      }
+    })
       .then(res => res.json())
       .then(data => { setMemory(data); setLoading(false); })
       .catch(() => setLoading(false));
   };
 
   const fetchUsersList = () => {
-    fetch(`${API_BASE}/api/users`)
+    fetch(`${API_BASE}/api/users`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-KEY': import.meta.env.VITE_API_KEY
+      }
+    })
       .then(res => res.json())
       .then(data => setUsers(data.agents || []))
       .catch(err => console.error(err));
@@ -70,7 +80,12 @@ export default function App() {
     setLoading(true);
     setLoginError('');
     try {
-      const res = await fetch(`${API_BASE}/api/memory?userId=${name}`);
+      const res = await fetch(`${API_BASE}/api/memory?userId=${name}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-KEY': import.meta.env.VITE_API_KEY
+        }
+      });
       if (!res.ok) throw new Error('Not found');
       const data = await res.json();
       

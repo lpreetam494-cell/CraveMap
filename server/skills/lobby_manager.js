@@ -12,9 +12,9 @@ const activeSessions = new Map();
  * Summarizes a user's vault into a privacy-preserving Taste Vector.
  * Does NOT transmit raw restaurant names or visit histories.
  */
-function extractTasteVector(telegramUserId) {
+async function extractTasteVector(telegramUserId) {
     try {
-        const vault = readUserVault(telegramUserId);
+        const vault = await readUserVault(telegramUserId);
         const profile = vault.user_profile || {};
         const vector = {
             identity: profile.persona_name || profile.name || 'Anonymous Peer',
@@ -66,7 +66,7 @@ const startLobby = async (ctx) => {
     }
 
     // Host vectorizes their personal vault
-    const data = extractTasteVector(hostId);
+    const data = await extractTasteVector(hostId);
     if (!data) return ctx.reply("❌ Cannot start lobby: Missing Sovereign Vault. Run /start first.");
 
     const session = {
@@ -118,7 +118,7 @@ const handleJoin = async (ctx) => {
     }
 
     // Vectorize this user's personal vault
-    const data = extractTasteVector(userId);
+    const data = await extractTasteVector(userId);
     if (!data) return ctx.answerCbQuery("You haven't onboarded yet! Send /start to the bot first.");
 
     session.joinedUserIds.add(userId);

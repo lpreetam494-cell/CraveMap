@@ -6,6 +6,7 @@
  * on localhost:8000, reducing latency by 500ms-1s per request.
  */
 const axios = require('axios');
+const { calculateTravelTime } = require('./location_service');
 
 const FASTAPI_ENDPOINT = 'http://127.0.0.1:8000';  // LOCAL ONLY - Part 3 Enforcement
 
@@ -13,6 +14,22 @@ const findBestRestaurant = async (payloadObj) => {
     try {
         console.log('📡 Calling FastAPI Social Brain microservice...');
         
+        // Phase 4: Location Intelligence
+        // If the host has coordinates, calculate travel times for all restaurants
+        if (payloadObj.host_restaurants && payloadObj.host_restaurants.length > 0) {
+            // Mocking host origin as Central Bangalore for demo if not provided
+            const originLat = payloadObj.origin_lat || 12.9716;
+            const originLng = payloadObj.origin_lng || 77.5946;
+            
+            const travelTimes = await calculateTravelTime(originLat, originLng, payloadObj.host_restaurants);
+            
+            // Merge travel times into host_restaurants
+            payloadObj.host_restaurants = payloadObj.host_restaurants.map(r => {
+                const tt = travelTimes.find(t => t.restaurant_id === r.id);
+                return { ...r, distance_km: tt ? tt.distance_km : null, duration_mins: tt ? tt.duration_mins : null };
+            });
+        }
+
         const response = await axios.post(
             `${FASTAPI_ENDPOINT}/process-social-brain`,
             payloadObj,

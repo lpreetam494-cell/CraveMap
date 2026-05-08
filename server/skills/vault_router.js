@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const writeFileAtomic = require('write-file-atomic');
+const cryptoUtil = require('../utils/crypto');
 
 const MEMORY_DIR = path.join(__dirname, '..', 'memory');
 
@@ -53,6 +54,10 @@ const writeQueue = new VaultWriteQueue();
  * Returns the vault file path for a specific Telegram user.
  */
 const getVaultPath = (telegramUserId) => {
+    // SECURITY: Prevent Path Traversal by strictly enforcing alphanumeric characters
+    if (!/^[a-zA-Z0-9_-]+$/.test(telegramUserId.toString())) {
+        throw new Error("Invalid userId format: Path Traversal Attempt Blocked");
+    }
     return path.join(MEMORY_DIR, `user_${telegramUserId}.json`);
 };
 
@@ -71,17 +76,31 @@ const createFreshVault = () => ({
 });
 
 /**
- * Reads a user's vault. Creates a fresh one if it doesn't exist.
+ * Reads a user's vault asynchronously to prevent event loop blocking.
+ * Creates a fresh one if it doesn't exist.
  */
-const readUserVault = (telegramUserId) => {
+const readUserVault = async (telegramUserId) => {
     const vaultPath = getVaultPath(telegramUserId);
     if (!fs.existsSync(vaultPath)) {
         const fresh = createFreshVault();
-        // Use synchronous write for initialization only
-        fs.writeFileSync(vaultPath, JSON.stringify(fresh, null, 2));
+        await fs.promises.writeFile(vaultPath, JSON.stringify(fresh, null, 2));
         return fresh;
     }
-    return JSON.parse(fs.readFileSync(vaultPath, 'utf8'));
+    const dataStr = await fs.promises.readFile(vaultPath, 'utf8');
+    const parsedData = JSON.parse(dataStr);
+    
+    // Sovereign Encryption: Decrypt restaurants array if it's encrypted
+    if (typeof parsedData.restaurants === 'string') {
+        try {
+            const decryptedStr = cryptoUtil.decrypt(parsedData.restaurants);
+            parsedData.restaurants = JSON.parse(decryptedStr);
+        } catch (e) {
+            console.error(`Failed to decrypt vault for ${telegramUserId}:`, e.message);
+            parsedData.restaurants = [];
+        }
+    }
+    
+    return parsedData;
 };
 
 /**
@@ -94,7 +113,13 @@ const writeUserVault = async (telegramUserId, data) => {
     return new Promise((resolve, reject) => {
         writeQueue.enqueue(telegramUserId, async () => {
             try {
-                await writeFileAtomic(vaultPath, JSON.stringify(data, null, 2));
+                // Sovereign Encryption: Encrypt restaurants array before saving
+                const vaultCopy = { ...data };
+                if (Array.isArray(vaultCopy.restaurants)) {
+                    vaultCopy.restaurants = cryptoUtil.encrypt(JSON.stringify(vaultCopy.restaurants));
+                }
+                
+                await writeFileAtomic(vaultPath, JSON.stringify(vaultCopy, null, 2));
                 resolve();
             } catch (err) {
                 reject(err);
@@ -109,14 +134,18 @@ const writeUserVault = async (telegramUserId, data) => {
  */
 const writeUserVaultSync = (telegramUserId, data) => {
     const vaultPath = getVaultPath(telegramUserId);
-    fs.writeFileSync(vaultPath, JSON.stringify(data, null, 2));
+    const vaultCopy = { ...data };
+    if (Array.isArray(vaultCopy.restaurants)) {
+        vaultCopy.restaurants = cryptoUtil.encrypt(JSON.stringify(vaultCopy.restaurants));
+    }
+    fs.writeFileSync(vaultPath, JSON.stringify(vaultCopy, null, 2));
 };
 
 /**
  * Updates a specific key in a user's profile atomically.
  */
 const updateUserProfile = async (telegramUserId, key, value) => {
-    const vault = readUserVault(telegramUserId);
+    const vault = await readUserVault(telegramUserId);
     if (!vault.user_profile) vault.user_profile = {};
     vault.user_profile[key] = value;
     await writeUserVault(telegramUserId, vault);
@@ -126,20 +155,33 @@ const updateUserProfile = async (telegramUserId, key, value) => {
  * Lists all onboarded users by scanning for user_*.json files.
  * Returns an array of { userId, profile, spotCount }.
  */
-const listAllUsers = () => {
+const listAllUsers = async () => {
     const users = [];
     if (!fs.existsSync(MEMORY_DIR)) return users;
 
-    const files = fs.readdirSync(MEMORY_DIR).filter(f => f.startsWith('user_') && f.endsWith('.json'));
-    for (const file of files) {
+    const files = await fs.promises.readdir(MEMORY_DIR);
+    const userFiles = files.filter(f => f.startsWith('user_') && f.endsWith('.json'));
+    
+    for (const file of userFiles) {
         try {
-            const data = JSON.parse(fs.readFileSync(path.join(MEMORY_DIR, file), 'utf8'));
+            const dataStr = await fs.promises.readFile(path.join(MEMORY_DIR, file), 'utf8');
+            const data = JSON.parse(dataStr);
             const userId = file.replace('user_', '').replace('.json', '');
             if (data.user_profile && data.user_profile.name) {
+                // Determine spot count based on whether it's encrypted or plaintext array
+                let spotCount = 0;
+                if (Array.isArray(data.restaurants)) spotCount = data.restaurants.length;
+                else if (typeof data.restaurants === 'string') {
+                    try {
+                        const dec = JSON.parse(cryptoUtil.decrypt(data.restaurants));
+                        spotCount = Array.isArray(dec) ? dec.length : 0;
+                    } catch (e) {}
+                }
+                
                 users.push({
                     userId,
                     profile: data.user_profile,
-                    spotCount: (data.restaurants || []).length,
+                    spotCount: spotCount,
                     stealthMode: data.stealth_mode || false
                 });
             }

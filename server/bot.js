@@ -11,6 +11,14 @@ const lobby_manager = require('./skills/lobby_manager');
 const { readUserVault, writeUserVault } = require('./skills/vault_router');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
+// Secure backend communication
+axios.interceptors.request.use(config => {
+    if (config.url && config.url.includes('localhost:5001')) {
+        config.headers['X-API-KEY'] = process.env.INTERNAL_API_SECRET;
+    }
+    return config;
+});
+
 const TMP_DIR = path.join(__dirname, 'tmp');
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
@@ -50,7 +58,7 @@ bot.start(async (ctx) => {
     saveChatId(ctx);
     const userId = ctx.from.id;
     try {
-        const vault = readUserVault(userId);
+        const vault = await readUserVault(userId);
         if (!vault.user_profile || !vault.user_profile.onboarding_complete) {
             return onboarding.startOnboarding(ctx);
         }
@@ -115,7 +123,7 @@ bot.action(/ob_style_(.+)/, async (ctx) => {
 bot.command('whoami', async (ctx) => {
     try {
         const userId = ctx.from.id;
-        const vault = readUserVault(userId);
+        const vault = await readUserVault(userId);
         if (!vault.user_profile || !vault.user_profile.onboarding_complete) {
             return ctx.reply("You haven't completed your Food DNA onboarding yet. Run /start to begin.");
         }
@@ -162,7 +170,7 @@ bot.action('reset_profile', async (ctx) => {
     const userId = ctx.from.id;
     ctx.reply("Profile reset triggered. To fully wipe your data, run /wipe_memory.");
     try {
-        const vault = readUserVault(userId);
+        const vault = await readUserVault(userId);
         delete vault.user_profile;
         writeUserVault(userId, vault);
     } catch (e) {}
@@ -336,10 +344,10 @@ bot.command('wipe_memory', (ctx) => {
     }
 });
 
-bot.command('privacy_mode', (ctx) => {
+bot.command('privacy_mode', async (ctx) => {
     try {
         const userId = ctx.from.id;
-        const vault = readUserVault(userId);
+        const vault = await readUserVault(userId);
         if (!vault.analytics) vault.analytics = {};
         vault.analytics.privacy_mode = !vault.analytics.privacy_mode;
         writeUserVault(userId, vault);
@@ -356,14 +364,13 @@ bot.command('privacy_mode', (ctx) => {
 
 // PART 3: SOVEREIGN LOCAL-FIRST ENFORCEMENT
 // Stealth Mode: Block all external API calls (Discovery, Web Search, Video Ingestion)
-bot.command('stealth_mode', (ctx) => {
+bot.command('stealth_mode', async (ctx) => {
     try {
         const userId = ctx.from.id;
-        const vault = readUserVault(userId);
+        const vault = await readUserVault(userId);
         if (!vault.analytics) vault.analytics = {};
-        
         vault.analytics.stealth_mode = !vault.analytics.stealth_mode;
-        writeUserVault(userId, vault);
+        await writeUserVault(userId, vault);
         
         if (vault.analytics.stealth_mode) {
             ctx.reply(
@@ -497,21 +504,34 @@ bot.command('dev_trigger_agency', async (ctx) => {
 });
 
 // Component 2: Natural Language Vault Queries & Media Ingestion
+const rateLimiter = new Map();
+
 bot.on('text', async (ctx) => {
     saveChatId(ctx);
     const text = ctx.message.text;
+    const userId = ctx.from.id;
     
     // Distinguish between a URL save request and a Natural Language search
     if (text.includes("http") || text.includes("instagram") || text.includes("tiktok")) {
+        
+        // Rate Limiter Logic (Max 1 link per 30 seconds per user)
+        const now = Date.now();
+        const userLastSent = rateLimiter.get(userId) || 0;
+        if (now - userLastSent < 30000) {
+            return ctx.reply("🛑 Please slow down! Wait 30 seconds before sending another link so my AI doesn't overload.");
+        }
+        rateLimiter.set(userId, now);
+
         ctx.reply("⚡ Agent Social Hunter is processing your media link...");
         try {
-            const response = await axios.post('http://localhost:5001/api/save', { text, userId: ctx.from.id }, { timeout: 10000 });
+            const response = await axios.post('http://localhost:5001/api/save', { text, userId: ctx.from.id }, { timeout: 60000 });
             if (response.data.success) {
                 if (response.data.isDiscovery) {
                     ctx.reply(response.data.message);
                 } else {
                     const entry = response.data.entry;
-                    ctx.reply(`📍 Saved to Sovereign Bucket!\n\nName: ${entry.name}\nCuisine: ${entry.cuisine}\nArea: ${entry.area}\n\nCheck your dashboard for behavioral insights.`);
+                    const mapsLink = entry.maps_url ? `\n🗺️ [Google Maps](${entry.maps_url})` : '';
+                    ctx.reply(`📍 Saved to Sovereign Bucket!\n\nName: ${entry.name}\nCuisine: ${entry.cuisine}\nArea: ${entry.area}${mapsLink}\n\nCheck your dashboard for behavioral insights.`, { parse_mode: 'Markdown' });
                 }
             } else {
                 // Show actual error from API (Instagram auth, Gemini limits, etc.)

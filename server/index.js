@@ -25,6 +25,15 @@ const io = require('socket.io')(http, {
 app.use(cors());
 app.use(bodyParser.json());
 
+// API Authentication Middleware
+app.use('/api', (req, res, next) => {
+    const apiKey = req.headers['x-api-key'];
+    if (!apiKey || apiKey !== process.env.INTERNAL_API_SECRET) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or missing X-API-KEY' });
+    }
+    next();
+});
+
 const MEMORY_PATH = path.join(__dirname, 'memory', 'food_memory.json');
 
 // Helper to emit agent thoughts
@@ -53,9 +62,9 @@ app.get('/api/memory', (req, res) => {
 });
 
 // 1b. Get All Onboarded Users (Agents Grid)
-app.get('/api/users', (req, res) => {
+app.get('/api/users', async (req, res) => {
     try {
-        const users = listAllUsers();
+        const users = await listAllUsers();
         res.json({ agents: users, count: users.length });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -91,7 +100,7 @@ app.post('/api/save', async (req, res) => {
     
     emitThought('Social Hunter', 'EXTRACTION', `Metadata extracted: ${extracted.name}`, extracted);
     
-    const memory = readUserVault(vaultUserId);
+    const memory = await readUserVault(vaultUserId);
     if (!memory.restaurants) memory.restaurants = [];
     
     // Implicit Scaling Logic
@@ -253,7 +262,7 @@ app.post('/api/search-vault', async (req, res) => {
     emitThought('Taste Alchemist', 'SEARCH', `Querying Sovereign Vault for: "${query}"`);
     
     const vaultUserId = userId || 'fallback';
-    const memory = readUserVault(vaultUserId);
+    const memory = await readUserVault(vaultUserId);
     const result = await searchVault(query, memory);
     
     res.json(result);
@@ -269,7 +278,7 @@ app.post('/api/discover', async (req, res) => {
     emitThought('Discovery Agent', 'SCOUT', `Starting discovery pipeline for "${area || `${lat},${lon}`}"...`);
 
     const vaultUserId = userId || 'fallback';
-    const memory = readUserVault(vaultUserId);
+    const memory = await readUserVault(vaultUserId);
     const friendVaults = {
         'Rohan': readVault('rohan_vault.json'),
         'Priya': readVault('priya_vault.json')
@@ -287,14 +296,14 @@ app.post('/api/discover', async (req, res) => {
 });
 
 // 7. Save a Discovery to Vault
-app.post('/api/save-discovery', (req, res) => {
+app.post('/api/save-discovery', async (req, res) => {
     const { discovery, userId } = req.body;
     if (!discovery || !discovery.name) {
         return res.status(400).json({ success: false, message: 'Invalid discovery data.' });
     }
 
     const vaultUserId = userId || 'fallback';
-    const memory = readUserVault(vaultUserId);
+    const memory = await readUserVault(vaultUserId);
     if (!memory.restaurants) memory.restaurants = [];
     const newEntry = {
         id: (memory.restaurants.length + 1).toString(),
@@ -342,7 +351,7 @@ app.post('/api/verify-visit', async (req, res) => {
     pythonProcess.stdin.write(JSON.stringify({ image_path: imagePath }));
     pythonProcess.stdin.end();
 
-    pythonProcess.on('close', (code) => {
+    pythonProcess.on('close', async (code) => {
         // Always clean up temp file
         try { if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath); } catch (e) {}
 
@@ -358,7 +367,7 @@ app.post('/api/verify-visit', async (req, res) => {
             }
 
             // Fuzzy match against vault
-            const memory = readUserVault(vaultUserId);
+            const memory = await readUserVault(vaultUserId);
             const identified = result.restaurant_name.toLowerCase();
             const idx = memory.restaurants.findIndex(r => {
                 const name = (r.name || '').toLowerCase();

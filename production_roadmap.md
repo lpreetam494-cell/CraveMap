@@ -1,62 +1,51 @@
-# CraveMap: Production Roadmap
+# CraveMap: Phased Production Roadmap
 **From Hackathon MVP to Full-Fledged Sovereign App**
 
 ---
 
-## 1. Communication Layer (Real Telegram Bot)
-The MVP uses a simulation script. For production, we need a live listener.
-*   **API:** [Telegraf (Telegram Bot API)](https://telegraf.js.org/)
-*   **Implementation:**
-    ```javascript
-    const { Telegraf } = require('telegraf');
-    const bot = new Telegraf(process.env.BOT_TOKEN);
-    
-    bot.on('message', async (ctx) => {
-        const text = ctx.message.text;
-        // Forward to Social Hunter Agent
-        const res = await axios.post('http://localhost:5000/api/save', { text });
-        ctx.reply(`📍 Saved ${res.data.entry.name} to your Sovereign Bucket List!`);
-    });
-    ```
+## Phase 1: MVP Core (Achieved ✅)
+The foundational architecture required to ingest, analyze, and retrieve personalized food data.
+*   **Live Communication Layer:** Fully implemented `Telegraf` (Telegram Bot API) listener handling text, interactive inline-keyboards for onboarding, and forwarding media links.
+*   **Ambient Awareness:** Integrated `OpenWeatherMap` API to trigger Lifestyle Operator logic (e.g., suggesting ramen on rainy days).
+*   **Intelligent Enrichment:** Built a "Self-Healing" data pipeline using Tavily Web Search and Groq (LLaMA 3) to automatically fill in missing restaurant data (cuisine, budget, vibe).
+*   **Sovereignty Core:** Transitioned from a monolithic data structure to strict Per-User Sovereign Vaults (`user_{telegramId}.json`), ensuring absolute data isolation.
 
-## 2. Location Intelligence (Google Maps)
-The MVP uses mock coordinates. Production needs real spatial data.
-*   **API:** [Google Places API](https://developers.google.com/maps/documentation/places/web-service/overview) or [Geoapify](https://www.geoapify.com/).
-*   **Implementation:**
-    *   **Extraction:** Use the API to get `place_id`, `rating`, `geometry`, and `price_level`.
-    *   **Distance Matrix:** Calculate travel times for Group Consensus using the `Distance Matrix API`.
+## Phase 2: Security & Performance Hardening (Achieved ✅)
+Essential infrastructure patches to ensure the local MVP can survive rigorous testing and demo environments without crashing.
+*   **Defeated RCE:** Replaced vulnerable shell executions (`exec`) with secure `execFile` calls to neutralize command injection attacks from malicious Instagram URLs.
+*   **Zero-Trust API Auth:** Implemented an internal secret `X-API-KEY` handshake between the Express API and the Telegram Bot to prevent ID spoofing.
+*   **Rate Limiting:** Added in-memory spam protection to prevent users from crashing Google Gemini quotas.
+*   **Event Loop Optimization:** Migrated all database reads to modern async Promises (`fs.promises`), preventing the Node.js server from freezing during heavy loads.
 
-## 3. Ambient Awareness (Weather & Time)
-*   **API:** [OpenWeatherMap API](https://openweathermap.org/api)
-*   **Implementation:**
-    *   Fetch weather for the user's `current_location` every 30 minutes.
-    *   Trigger `Lifestyle Operator` logic if `weather.main === 'Rain'` or `temp < 10`.
+## Phase 3: Frontend Polish & A2 UI Integration (Upcoming 🚧)
+The hackathon places a massive emphasis on visual aesthetics and user experience.
+*   **A2 UI Implementation:** Overhaul the entire React frontend to utilize the **A2 UI** design system. This will ensure the interface is stunning, responsive, and meets the strict UI rules of the hackathon.
+*   **Dynamic Dashboards:** Replace static CSS bars with interactive, animated data visualizations for the Intelligence Dashboard.
+*   **PWA Offline Mode:** Use a Service Worker so users can view their Sovereign Bucket List without an internet connection.
 
-## 4. Multi-User Persistence (Cloud Storage)
-The MVP uses a local `JSON` file. Production needs a scalable database.
-*   **Tech:** [MongoDB Atlas](https://www.mongodb.com/atlas/database) or [Supabase](https://supabase.com/).
-*   **Architecture:**
-    *   Each user has a `FoodBrain` document.
-    *   Groups are represented as shared documents with `member_ids` and `weighted_preferences`.
+## Phase 4: Location Intelligence & Google Maps (Upcoming 🚧)
+Moving from text-based guessing to absolute geospatial coordinates for real-world viability.
+*   **API Integration:** Hook into the [Google Places API](https://developers.google.com/maps/documentation/places/web-service/overview).
+*   **Implementation:** 
+    *   When the bot extracts a name, it will ping Google to fetch the precise `place_id`, `lat/long` coordinates, and the direct Google Maps routing link.
+    *   This enables the Group Consensus engine to calculate actual travel times using the Google Distance Matrix API.
 
-## 5. Security & Sovereignty
-To maintain the "Sovereign" promise:
-*   **End-to-End Encryption:** Use `AES-256` for restaurant notes.
-*   **Self-Hosting Option:** Package the `server` as a Docker container so users can host their own "Food Brain" on a Raspberry Pi or local server.
-
-## 6. Frontend Polish
-*   **Framework:** Deploy the Vite app to **Vercel** or **Netlify**.
-*   **Charts:** Replace the CSS bars with [Recharts](https://recharts.org/) for the Intelligence Dashboard.
-*   **Offline Mode:** Use a Service Worker (PWA) to allow users to view their Bucket List without internet.
+## Phase 5: Cloud Database Migration (Final Phase 🚀)
+The ultimate step to move from a "Local-First" prototype to a massively scalable cloud application.
+*   **Tech Stack:** Migrate from local JSON files to [MongoDB Atlas](https://www.mongodb.com/atlas/database) or Supabase.
+*   **Implementation:** 
+    *   Because our data is already structured perfectly as JSON documents (profiles, restaurants array, etc.), migrating to MongoDB collections will require minimal refactoring of `vault_router.js`.
+    *   This migration is strictly required before deploying the Express backend to a cloud platform like Render or AWS, as local files do not persist across cloud server restarts.
+*   **End-to-End Encryption:** Implement `AES-256` encryption at the database level to maintain the "Sovereign" privacy promise, even in the cloud.
 
 ---
 
-## Full Tech Stack (Target)
+## Full Tech Stack Target
 | Layer | Technology |
 |---|---|
-| **Frontend** | React (Vite) + Tailwind CSS + Framer Motion |
+| **Frontend** | React (Vite) + **A2 UI** + Framer Motion |
 | **Backend** | Node.js + Express + Socket.io |
-| **Agents** | Groq (Llama 3) + OpenClaw Orchestration |
-| **Database** | MongoDB (User Data) + Redis (Agent State) |
-| **APIs** | Telegram, Google Maps, OpenWeather |
+| **Agents** | Groq (Llama 3) + Python Ingestion Engine |
+| **Database** | MongoDB Atlas (User Data) + Redis (Agent State) |
+| **APIs** | Telegram, Google Maps, OpenWeather, Tavily |
 | **Deployment** | Vercel (Frontend), Render/AWS (Backend) |

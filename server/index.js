@@ -202,7 +202,24 @@ app.post('/api/group-decision', async (req, res) => {
 
     // Inject live negative_preferences from vault into session constraints
     try {
-        const myVault = readVault('food_memory.json');
+        let activeUserId = 'food_memory';
+        const MEMORY_DIR = path.join(__dirname, 'memory');
+        if (fs.existsSync(MEMORY_DIR)) {
+            const files = await fs.promises.readdir(MEMORY_DIR);
+            const userFiles = files.filter(f => f.endsWith('.json') && f !== 'food_memory.json');
+            if (userFiles.length > 0) {
+                const fileStats = await Promise.all(
+                    userFiles.map(async (file) => {
+                        const filePath = path.join(MEMORY_DIR, file);
+                        const stat = await fs.promises.stat(filePath);
+                        return { file, mtime: stat.mtime };
+                    })
+                );
+                fileStats.sort((a, b) => b.mtime - a.mtime);
+                activeUserId = fileStats[0].file.replace('.json', '');
+            }
+        }
+        const myVault = await readUserVault(activeUserId);
         const recentNegPrefs = (myVault.negative_preferences || []).slice(-10);
         if (recentNegPrefs.length > 0) {
             constraints = { ...(constraints || {}), negative_preferences: recentNegPrefs };
@@ -221,12 +238,29 @@ app.post('/api/group-decision', async (req, res) => {
 
         // If not using the lobby (legacy call from frontend dashboard), fallback to reading local vault
         if (!host_restaurants || host_restaurants.length === 0) {
-             const myVault = readVault('food_memory.json');
+             let activeUserId = 'food_memory';
+             const MEMORY_DIR = path.join(__dirname, 'memory');
+             if (fs.existsSync(MEMORY_DIR)) {
+                 const files = await fs.promises.readdir(MEMORY_DIR);
+                 const userFiles = files.filter(f => f.endsWith('.json') && f !== 'food_memory.json');
+                 if (userFiles.length > 0) {
+                     const fileStats = await Promise.all(
+                         userFiles.map(async (file) => {
+                             const filePath = path.join(MEMORY_DIR, file);
+                             const stat = await fs.promises.stat(filePath);
+                             return { file, mtime: stat.mtime };
+                         })
+                     );
+                     fileStats.sort((a, b) => b.mtime - a.mtime);
+                     activeUserId = fileStats[0].file.replace('.json', '');
+                 }
+             }
+             const myVault = await readUserVault(activeUserId);
              payloadForPython.host_restaurants = myVault.restaurants || [];
              
              // Create a mock vector for the sole user
              payloadForPython.peer_vectors = [{
-                 identity: "Local Agent",
+                 identity: myVault.user_profile?.name || "Local Agent",
                  dietary: myVault.user_profile?.dietary || [],
                  cuisines: {},
                  vibes: {},
@@ -244,22 +278,28 @@ app.post('/api/group-decision', async (req, res) => {
         if (bestOption && bestOption.cuisine) {
             const cuisines = bestOption.cuisine.split(',').map(c => c.trim().toLowerCase());
             
-            Object.keys(groupVaults).forEach(user => {
-                const vault = groupVaults[user];
-                if (!vault.craving_patterns) vault.craving_patterns = {};
-                
-                cuisines.forEach(c => {
-                    vault.craving_patterns[c] = {
-                        last_satisfied: new Date().toISOString(),
-                        cooldown_days: 5
-                    };
-                });
-                
-                // Determine filename
-                const filename = user === "Akash" ? "food_memory.json" : `${user.toLowerCase()}_vault.json`;
-                writeVault(filename, vault);
-            });
-            emitThought('Memory Node', 'PERSISTENCE', `Updated Craving Cycles across all group vaults with 5-day cooldown for [${cuisines.join(', ')}]`);
+            // Dynamically update peer craving cycles to enforce 5-day cooldown in their vaults
+            for (const peer of (peer_vectors || [])) {
+                try {
+                    const peerName = peer.identity;
+                    if (peerName && peerName !== 'Local Agent' && peerName !== 'Anonymous Peer') {
+                        const vault = await readUserVault(peerName);
+                        if (vault) {
+                            if (!vault.craving_patterns) vault.craving_patterns = {};
+                            cuisines.forEach(c => {
+                                vault.craving_patterns[c] = {
+                                    last_satisfied: new Date().toISOString(),
+                                    cooldown_days: 5
+                                };
+                            });
+                            await writeUserVault(peerName, vault);
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed to update peer craving pattern:", e.message);
+                }
+            }
+            emitThought('Memory Node', 'PERSISTENCE', `Updated Craving Cycles across all active group vaults with 5-day cooldown for [${cuisines.join(', ')}]`);
         }
         
         setTimeout(() => {

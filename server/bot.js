@@ -578,6 +578,55 @@ bot.on('text', async (ctx) => {
                 return ctx.reply("⚠️ Please enter a valid name (between 2 and 30 characters, no slashes):");
             }
             
+            const sanitized = typedName.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+            const MEMORY_DIR = path.join(__dirname, 'memory');
+            const targetPath = path.join(MEMORY_DIR, `${sanitized}.json`);
+            
+            // SECURITY/INTELLIGENCE: If user-vault already exists on disk, link and load it instantly!
+            if (fs.existsSync(targetPath)) {
+                try {
+                    const existingDataStr = fs.readFileSync(targetPath, 'utf8');
+                    const existingData = JSON.parse(existingDataStr);
+                    
+                    if (existingData.user_profile) {
+                        // Associate current Telegram ID to this existing vault!
+                        existingData.user_profile.telegram_id = userId;
+                        existingData.user_profile.telegram_username = ctx.from?.username || 'Unknown';
+                        delete existingData.user_profile.awaiting_name_input;
+                        
+                        // Save the updated vault back to disk
+                        const { writeUserVault } = require('./skills/vault_router');
+                        await writeUserVault(sanitized, existingData);
+                        
+                        // Clean up temporary user_<id>.json if it exists
+                        const tempPath = path.join(MEMORY_DIR, `user_${userId}.json`);
+                        if (fs.existsSync(tempPath)) {
+                            fs.unlinkSync(tempPath);
+                        }
+                        
+                        let spotCount = 0;
+                        if (Array.isArray(existingData.restaurants)) {
+                            spotCount = existingData.restaurants.length;
+                        } else if (typeof existingData.restaurants === 'string') {
+                            try {
+                                const cryptoUtil = require('./utils/crypto');
+                                const dec = JSON.parse(cryptoUtil.decrypt(existingData.restaurants));
+                                spotCount = Array.isArray(dec) ? dec.length : 0;
+                            } catch (e) {}
+                        }
+                        
+                        return ctx.reply(
+                            `🔑 *Sovereign Vault Linked Successfully!* 🔐\n\n` +
+                            `Welcome back, *${existingData.user_profile.name}*! I found your existing vault file on disk with *${spotCount} saved spot(s)*.\n\n` +
+                            `Your profile and data are fully loaded and active. Run /whoami or search your vault anytime!`,
+                            { parse_mode: 'Markdown' }
+                        );
+                    }
+                } catch (err) {
+                    console.error("Existing vault merge error:", err.message);
+                }
+            }
+            
             // Save name to profile and remove wait flag
             vault.user_profile.name = typedName;
             delete vault.user_profile.awaiting_name_input;

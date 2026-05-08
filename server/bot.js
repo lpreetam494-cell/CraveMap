@@ -99,6 +99,42 @@ bot.start(async (ctx) => {
     );
 });
 
+// Dynamic Web Scout Enrichment via Groq LLM
+const enrichWebScoutRestaurant = async (name, address) => {
+    try {
+        if (!process.env.GROQ_API_KEY) {
+            return { cuisine: 'Mixed', vibe: 'Local gem' };
+        }
+        const Groq = require('groq-sdk');
+        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+        const completion = await groq.chat.completions.create({
+            model: 'llama-3.3-70b-versatile',
+            response_format: { type: 'json_object' },
+            messages: [
+                {
+                    role: 'system',
+                    content: `You are a restaurant data enricher. For the given restaurant name and address, infer the most likely cuisine type and a short list of vibe/atmosphere tags.
+Return JSON format: {"cuisine": "string", "vibe": "string of 2-3 tags separated by commas"}`
+                },
+                {
+                    role: 'user',
+                    content: `Restaurant Name: "${name}"\nAddress: "${address}"`
+                }
+            ],
+            temperature: 0.1,
+            max_tokens: 300
+        });
+        const result = JSON.parse(completion.choices[0].message.content);
+        return {
+            cuisine: result.cuisine || 'Mixed',
+            vibe: result.vibe || 'Local gem'
+        };
+    } catch (e) {
+        console.error("Failed to enrich restaurant with LLM:", e.message);
+        return { cuisine: 'Mixed', vibe: 'Local gem' };
+    }
+};
+
 // --- WEB SEARCH SAFETY NET ACTION ---
 bot.action(/add_search_spot_(.+)/, async (ctx) => {
     try {
@@ -114,10 +150,16 @@ bot.action(/add_search_spot_(.+)/, async (ctx) => {
         const { readUserVault, writeUserVault } = require('./skills/vault_router');
         const vault = await readUserVault(userId);
         
+        // Notify user about intelligence parsing
+        const waitMsg = await ctx.reply("🧠 *Sovereign Intelligence:* Inferring cuisine and vibe tags for your vault...");
+        const enrichment = await enrichWebScoutRestaurant(spotObj.name, spotObj.formatted_address);
+        try { await ctx.telegram.deleteMessage(ctx.chat.id, waitMsg.message_id); } catch(e) {}
+
         const newEntry = {
             id: `rest_${Date.now()}`,
             name: spotObj.name,
-            cuisine: 'Saved from Web Search',
+            cuisine: enrichment.cuisine,
+            vibe: enrichment.vibe,
             area: spotObj.formatted_address.split(',')[0] || 'Local',
             lat: spotObj.lat,
             lng: spotObj.lng,
@@ -133,8 +175,11 @@ bot.action(/add_search_spot_(.+)/, async (ctx) => {
         await writeUserVault(userId, vault);
         
         await ctx.editMessageText(
-            `🎉 *Successfully Saved!* \n\n` +
-            `📍 *${spotObj.name}* has been securely encrypted and committed to your personal food brain.\n\n` +
+            `🎉 *Successfully Saved with AI Enrichment!* \n\n` +
+            `📍 **${spotObj.name}**\n` +
+            `🥘 *Cuisine:* ${enrichment.cuisine}\n` +
+            `✨ *Vibe:* ${enrichment.vibe}\n\n` +
+            `Securely encrypted and committed to your personal food brain.\n` +
             `Check your web dashboard to see it on the map!`,
             { parse_mode: 'Markdown' }
         );

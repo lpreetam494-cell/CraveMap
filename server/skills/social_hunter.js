@@ -93,9 +93,9 @@ const extractRestaurantData = async (text) => {
     
     let processText = text;
 
-    // MULTIMODAL INGESTION ENGINE LOGIC
-    if (text.includes("instagram.com") || text.includes("tiktok.com")) {
-        console.log("⚡ Social Hunter: Video link detected. Spawning Python Ingestion Engine...");
+    // RAPIDAPI INSTAGRAM SCRAPER LOGIC
+    if (text.includes("instagram.com")) {
+        console.log("⚡ Social Hunter: Instagram link detected. Attempting RapidAPI Scrape...");
         
         try {
             // Extract the URL from the text (assuming it might be mixed with text)
@@ -199,7 +199,7 @@ const extractRestaurantData = async (text) => {
             messages: [
                 {
                     role: "system",
-                    content: "Extract restaurant data from the message. Return JSON with: name, cuisine, area, budget (number), vibe, meal_type, high_intent (boolean), and socially_high_value (boolean). Set high_intent to true if the user expresses strong desire or uses modern slang (e.g. 'I NEED this', 'this spot is gas', 'no cap'). Set socially_high_value to true if the context implies group sharing."
+                    content: "Extract restaurant data from the message. Return JSON with: name, cuisine, area, budget (number), vibe, and meal_type. If missing, use null."
                 },
                 {
                     role: "user",
@@ -218,11 +218,10 @@ const extractRestaurantData = async (text) => {
         return {
             name: "Extracted Spot",
             cuisine: "Unknown",
+            area: "Local",
             budget: 500,
             vibe: "Unknown",
-            meal_type: "lunch",
-            high_intent: false,
-            socially_high_value: false
+            meal_type: "lunch"
         };
     }
 };

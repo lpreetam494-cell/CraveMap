@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import {
   Zap, TrendingUp, Wallet, MapPin, Eye,
-  ArrowUpRight, Activity, Coffee, Pizza, Flame, Loader
+  ArrowUpRight, Activity, Coffee, Pizza, Flame
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -36,45 +36,6 @@ export default function Overview({ memory, loading }) {
   const visitedCount = restaurants.filter(r => r.visited).length;
   const bucketCount = restaurants.filter(r => !r.visited).length;
 
-  const [consensusLoading, setConsensusLoading] = useState(false);
-  const [consensusResult, setConsensusResult] = useState(null);
-  const [heartbeatLoading, setHeartbeatLoading] = useState(false);
-  const [heartbeatResult, setHeartbeatResult] = useState(null);
-
-  const handleConsensus = async () => {
-    setConsensusLoading(true);
-    setConsensusResult(null);
-    try {
-      const res = await fetch('http://localhost:5001/api/group-decision', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ constraints: {} })
-      });
-      const data = await res.json();
-      if (data.best_option) {
-        setConsensusResult({ ok: true, text: `🏆 ${data.best_option.name} — ${data.best_option.cuisine || '?'} (${data.best_option.area || '?'})\n\n${data.reasoning}` });
-      } else {
-        setConsensusResult({ ok: false, text: 'No consensus found. Add more spots to your vault!' });
-      }
-    } catch (e) {
-      setConsensusResult({ ok: false, text: 'Failed to reach consensus engine.' });
-    }
-    setConsensusLoading(false);
-  };
-
-  const handleHeartbeat = async () => {
-    setHeartbeatLoading(true);
-    setHeartbeatResult(null);
-    try {
-      const res = await fetch('http://localhost:5001/api/heartbeat', { method: 'POST' });
-      const data = await res.json();
-      setHeartbeatResult({ ok: data.success, text: data.message });
-    } catch (e) {
-      setHeartbeatResult({ ok: false, text: 'Heartbeat failed — is the server running?' });
-    }
-    setHeartbeatLoading(false);
-  };
-
   const today = new Date();
 
   return (
@@ -86,54 +47,6 @@ export default function Overview({ memory, loading }) {
         <StatCard icon={TrendingUp} label="Bucket List" value={bucketCount} accent="purple" />
         <StatCard icon={Wallet} label="Weekly Spend" value={`₹${analytics.weekly_spend || 0}`} accent="orange" />
       </div>
-
-      {/* ─── Sovereign Food Persona ─── */}
-      {memory?.user_profile && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="a2ui-card bg-gradient-to-br from-slate-900 to-slate-800 text-white border-0 shadow-xl shadow-slate-900/20 relative overflow-hidden"
-        >
-          {/* Decorative background elements */}
-          <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-primary/20 rounded-full blur-3xl mix-blend-screen" />
-          <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-64 h-64 bg-blue-500/20 rounded-full blur-3xl mix-blend-screen" />
-          
-          <div className="relative z-10 flex flex-col md:flex-row gap-8 items-center justify-between">
-            <div className="flex items-center gap-6">
-              <div className="w-20 h-20 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 shadow-inner">
-                <span className="text-4xl">🧬</span>
-              </div>
-              <div>
-                <div className="flex items-center gap-3 mb-1">
-                  <h3 className="text-2xl font-black tracking-tight">{memory.user_profile.persona_name || "Synthesizing Persona..."}</h3>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-primary text-white">Food DNA Active</span>
-                </div>
-                <p className="text-slate-300 font-medium">Primary Identity: {memory.user_profile.name}</p>
-              </div>
-            </div>
-            
-            <div className="flex flex-wrap gap-3">
-              <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
-                <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Vibe</span>
-                <span className="font-semibold text-sm">{memory.user_profile.vibe}</span>
-              </div>
-              <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
-                <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Budget</span>
-                <span className="font-semibold text-sm text-green-400">{memory.user_profile.budget}</span>
-              </div>
-              <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
-                <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Heat Index</span>
-                <span className="font-semibold text-sm text-orange-400">{memory.user_profile.heat}</span>
-              </div>
-              <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
-                <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Dietary</span>
-                <span className="font-semibold text-sm text-blue-300">{(memory.user_profile.dietary || []).join(', ') || 'None'}</span>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-      )}
 
       {/* ─── Main Grid ─── */}
       <div className="grid grid-cols-3 gap-6">
@@ -156,36 +69,22 @@ export default function Overview({ memory, loading }) {
               across <strong className="text-textMain font-bold">{[...new Set(restaurants.map(r => r.area))].length}</strong> areas in Bangalore.
               All behavioral data is stored in your <span className="text-primary font-semibold">Sovereign Data Vault</span> — no cloud, no corporate tracking.
             </p>
-
-            {/* Consensus result banner */}
-            {consensusResult && (
-              <div className={`mt-4 p-3 rounded-xl text-sm whitespace-pre-line border ${consensusResult.ok ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-700'}`}>
-                {consensusResult.text}
-              </div>
-            )}
-            {/* Heartbeat result banner */}
-            {heartbeatResult && (
-              <div className={`mt-3 p-3 rounded-xl text-sm border ${heartbeatResult.ok ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-red-50 border-red-200 text-red-700'}`}>
-                ⚡ {heartbeatResult.text}
-              </div>
-            )}
           </div>
           <div className="flex gap-3 mt-6">
-            <button
-              onClick={handleConsensus}
-              disabled={consensusLoading}
-              className="a2ui-button flex items-center gap-2 disabled:opacity-60"
+            <button 
+              onClick={() => {
+                fetch('http://localhost:5001/api/group-decision', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ groupPrefs: ['Spicy', 'South Indian'] })
+                });
+              }}
+              className="a2ui-button flex items-center gap-2"
             >
-              {consensusLoading ? <Loader size={15} className="animate-spin" /> : <Zap size={15} />}
-              {consensusLoading ? 'Calculating...' : 'Trigger Consensus'}
+              <Zap size={15} /> Trigger Consensus
             </button>
-            <button
-              onClick={handleHeartbeat}
-              disabled={heartbeatLoading}
-              className="a2ui-button-ghost flex items-center gap-2 disabled:opacity-60"
-            >
-              {heartbeatLoading ? <Loader size={15} className="animate-spin" /> : <Activity size={15} />}
-              {heartbeatLoading ? 'Running...' : 'Force Heartbeat'}
+            <button className="a2ui-button-ghost flex items-center gap-2">
+              <Activity size={15} /> Force Heartbeat
             </button>
           </div>
         </motion.div>

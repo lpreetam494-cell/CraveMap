@@ -7,13 +7,11 @@ import {
 import Overview from './components/Overview';
 import FoodVault from './components/FoodVault';
 import SocialGraph from './components/SocialGraph';
-import AgentGrid from './components/AgentGrid';
 
 const API_BASE = 'http://localhost:5001';
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
-  { id: 'agents', label: 'Agents', icon: Users },
   { id: 'vault', label: 'Food Vault', icon: Utensils },
   { id: 'social', label: 'Social Graph', icon: Users },
 ];
@@ -23,26 +21,18 @@ export default function App() {
   const [memory, setMemory] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchMemory = () => {
+  useEffect(() => {
     fetch(`${API_BASE}/api/memory`)
       .then(res => res.json())
       .then(data => { setMemory(data); setLoading(false); })
       .catch(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    fetchMemory();
-    const interval = setInterval(fetchMemory, 5000);
-    return () => clearInterval(interval);
   }, []);
 
   const pageTitle = activeTab === 'dashboard' ? 'Intelligence Dashboard'
-    : activeTab === 'agents' ? 'Sovereign Agents'
     : activeTab === 'vault' ? 'Sovereign Food Vault'
     : 'Social Taste Graph';
 
   const pageSubtitle = activeTab === 'dashboard' ? 'Real-time behavioral insights from your personal food memory.'
-    : activeTab === 'agents' ? 'Every onboarded user and their unique Food DNA profile.'
     : activeTab === 'vault' ? 'Your encrypted, offline memory of every culinary discovery.'
     : 'Visualizing trust networks and preference alignment.';
 
@@ -125,7 +115,6 @@ export default function App() {
             transition={{ duration: 0.3 }}
           >
             {activeTab === 'dashboard' && <Overview memory={memory} loading={loading} />}
-            {activeTab === 'agents' && <AgentGrid />}
             {activeTab === 'vault' && <FoodVault memory={memory} />}
             {activeTab === 'social' && <SocialGraph memory={memory} />}
           </motion.div>

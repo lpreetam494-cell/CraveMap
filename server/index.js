@@ -89,6 +89,69 @@ app.get('/api/memory', async (req, res) => {
         
         if (userId) {
             const data = await readUserVault(userId);
+            
+            // Dynamically populate social graph with real/mock peers for interactive network topology
+            if (!data.social_graph || Object.keys(data.social_graph).length === 0) {
+                try {
+                    const allUsers = await listAllUsers();
+                    const social_graph = {};
+                    
+                    for (const peer of allUsers) {
+                        // Skip ourselves and invalid profiles
+                        if (peer.userId === userId) continue;
+                        
+                        const peerName = peer.profile.name || (peer.userId.startsWith('user_') ? 'Peer ' + peer.userId.split('_')[1] : peer.userId);
+                        if (peerName === "Unknown" || peerName === "No Name") continue;
+                        
+                        let match_score = 0.70; // baseline match
+                        
+                        // Compare dietary constraints (Veg vs Non-Veg alignment)
+                        const user_diet = (data.user_profile?.dietary_restrictions || '').toLowerCase();
+                        const peer_diet = (peer.profile.dietary_restrictions || '').toLowerCase();
+                        if (user_diet.includes('veg') === peer_diet.includes('veg')) {
+                            match_score += 0.15;
+                        } else {
+                            match_score -= 0.15;
+                        }
+                        
+                        // Compare spice alignment
+                        const user_spice = (data.user_profile?.spice_tolerance || '').toLowerCase();
+                        const peer_spice = (peer.profile.spice_tolerance || '').toLowerCase();
+                        if (user_spice === peer_spice) {
+                            match_score += 0.05;
+                        }
+                        
+                        // Compare cuisine overlap
+                        const u1_cuisines = new Set((data.restaurants || []).map(r => (r.cuisine || '').toLowerCase()).filter(Boolean));
+                        const peer_vault = await readUserVault(peer.userId);
+                        const peer_cuisines = new Set((peer_vault.restaurants || []).map(r => (r.cuisine || '').toLowerCase()).filter(Boolean));
+                        
+                        let overlap = 0;
+                        u1_cuisines.forEach(c => { if (peer_cuisines.has(c)) overlap++; });
+                        if (u1_cuisines.size > 0) {
+                            match_score += (overlap / u1_cuisines.size) * 0.15;
+                        }
+                        
+                        match_score = Math.max(0.45, Math.min(0.98, match_score));
+                        
+                        const peer_cuisine_list = Array.from(peer_cuisines).filter(c => c !== 'saved from web search');
+                        if (peer_cuisine_list.length === 0) {
+                            peer_cuisine_list.push('Italian', 'American', 'South Indian');
+                        }
+                        
+                        social_graph[peerName] = {
+                            match_score: parseFloat(match_score.toFixed(2)),
+                            recommendations: Math.max(1, (peer_vault.restaurants || []).length),
+                            you_visited: Math.floor(Math.random() * 4) + 1,
+                            preferences: peer_cuisine_list.slice(0, 3).map(c => c.split(',')[0].trim().charAt(0).toUpperCase() + c.split(',')[0].trim().slice(1))
+                        };
+                    }
+                    data.social_graph = social_graph;
+                } catch (err) {
+                    console.error("Failed to build dynamic social graph:", err.message);
+                }
+            }
+            
             return res.json(data);
         }
         

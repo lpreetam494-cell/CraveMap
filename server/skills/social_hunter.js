@@ -11,7 +11,12 @@ const enrichRestaurantData = async (extractedData, groq) => {
     // If name is unknown, we cannot geocode or enrich effectively
     if (!extractedData.name || extractedData.name === "Unknown") return extractedData;
     
-    const isMissing = (val) => !val || val === "Unknown" || val === "null";
+    const isMissing = (val) => {
+        if (!val) return true;
+        const s = String(val).trim().toLowerCase();
+        return s === 'unknown' || s === 'null' || s === 'n/a' || s === 'na' || s === 'none' || s === '';
+    };
+
     const needsEnrichment = isMissing(extractedData.cuisine) || isMissing(extractedData.area) || isMissing(extractedData.vibe) || isMissing(extractedData.budget);
     
     if (!needsEnrichment) {
@@ -42,7 +47,16 @@ const enrichRestaurantData = async (extractedData, groq) => {
             messages: [
                 {
                     role: "system",
-                    content: "You are a data enrichment agent. I will give you a restaurant's partial data and some web search snippets. Fill in the missing fields (cuisine, area, budget, vibe) based on the snippets. Keep existing valid data intact. Return JSON with exact keys: name, cuisine, area, budget, vibe, meal_type, high_intent, socially_high_value. Make 'budget' a number (e.g., 500, 1000)."
+                    content: `You are a restaurant data enrichment agent. I will give you a restaurant's partial data and some web search snippets.
+Fill in the missing fields (cuisine, area, budget, vibe) based on the snippets.
+Keep existing valid data intact.
+Return JSON with exact keys: name, cuisine, area, budget, vibe, meal_type, high_intent, socially_high_value.
+
+CRITICAL INSTRUCTIONS:
+- DO NOT return "N/A", "NA", "Unknown", "null", or empty values for any field.
+- If a value is missing from the search snippets, you MUST use your own general knowledge to infer the most likely and accurate cuisine type, typical area, budget rating (e.g. 500, 1000), and vibe tags instead of leaving them empty.
+- Keep the cuisine and vibe description specific and appealing (no generic placeholders).
+- 'budget' must be a number representing the average meal cost per person in INR.`
                 },
                 {
                     role: "user",
@@ -52,7 +66,7 @@ const enrichRestaurantData = async (extractedData, groq) => {
             model: "llama-3.3-70b-versatile",
             response_format: { type: "json_object" }
         });
-
+ 
         const enriched = JSON.parse(completion.choices[0].message.content);
         console.log(`✅ Enrichment complete for "${extractedData.name}"`);
         
@@ -65,9 +79,15 @@ const enrichRestaurantData = async (extractedData, groq) => {
             budget: isMissing(extractedData.budget) ? enriched.budget : extractedData.budget
         };
 
+        // Ultimate safety guardrail: force realistic fallbacks if LLM still returned any form of NA
+        if (isMissing(finalData.cuisine)) finalData.cuisine = "Mixed Cuisine";
+        if (isMissing(finalData.area)) finalData.area = extractedData.area || "Local";
+        if (isMissing(finalData.vibe)) finalData.vibe = "Cozy, Welcoming";
+        if (isMissing(finalData.budget)) finalData.budget = 500;
+
         const geo = await resolveGeocoordinates(finalData.name, finalData.area);
         return { ...finalData, ...geo };
-
+ 
     } catch (e) {
         console.error("❌ Enrichment failed:", e.message);
         const geo = await resolveGeocoordinates(extractedData.name, extractedData.area);

@@ -23,7 +23,10 @@ export default function App() {
   const [memory, setMemory] = useState(null);
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
-  const [selectedUser, setSelectedUser] = useState('');
+  const [selectedUser, setSelectedUser] = useState(localStorage.getItem('cravemap_user') || '');
+  const [currentUser, setCurrentUser] = useState(localStorage.getItem('cravemap_user') || '');
+  const [loginInput, setLoginInput] = useState('');
+  const [loginError, setLoginError] = useState('');
 
   const fetchMemory = () => {
     const url = selectedUser 
@@ -49,10 +52,109 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    fetchMemory();
-    const interval = setInterval(fetchMemory, 5000);
-    return () => clearInterval(interval);
-  }, [selectedUser]);
+    if (currentUser) {
+      fetchMemory();
+      const interval = setInterval(fetchMemory, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [selectedUser, currentUser]);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    const name = loginInput.trim().replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+    if (!name) {
+      setLoginError('Please enter your sovereign profile name.');
+      return;
+    }
+    
+    setLoading(true);
+    setLoginError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/memory?userId=${name}`);
+      if (!res.ok) throw new Error('Not found');
+      const data = await res.json();
+      
+      if (data && data.user_profile) {
+        localStorage.setItem('cravemap_user', name);
+        setCurrentUser(name);
+        setSelectedUser(name);
+        setMemory(data);
+        setLoading(false);
+      } else {
+        throw new Error('Invalid structure');
+      }
+    } catch (err) {
+      setLoading(false);
+      setLoginError('❌ Sovereign Vault not found on disk. Setup your profile in Telegram first!');
+    }
+  };
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 font-sans text-slate-100 selection:bg-primary/30">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.15),rgba(255,255,255,0))]" />
+        
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }} 
+          animate={{ opacity: 1, y: 0 }} 
+          transition={{ duration: 0.6 }}
+          className="w-full max-w-md bg-slate-900/80 backdrop-blur-md border border-slate-800 p-8 rounded-3xl shadow-2xl relative overflow-hidden"
+        >
+          {/* Decorative glows */}
+          <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-primary to-transparent" />
+          
+          <div className="flex flex-col items-center text-center mb-8">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center text-white shadow-lg shadow-primary/20 mb-4">
+              <BrainCircuit size={32} />
+            </div>
+            <h1 className="text-2xl font-black tracking-tight text-white mb-2">CraveMap Sovereign</h1>
+            <p className="text-slate-400 text-sm max-w-xs">
+              Decrypt and mount your private, offline Sovereign Food Vault locally.
+            </p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                Sovereign Name (e.g. Preetam)
+              </label>
+              <input
+                type="text"
+                placeholder="Enter profile username"
+                value={loginInput}
+                onChange={(e) => setLoginInput(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 focus:border-primary rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none transition duration-200"
+              />
+            </div>
+
+            {loginError && (
+              <motion.p 
+                initial={{ opacity: 0, y: -5 }} 
+                animate={{ opacity: 1, y: 0 }}
+                className="text-xs font-semibold text-rose-400"
+              >
+                {loginError}
+              </motion.p>
+            )}
+
+            <button
+              type="submit"
+              className="w-full bg-primary hover:bg-primary/90 text-white font-bold text-sm py-3 rounded-xl shadow-lg shadow-primary/10 transition duration-200 flex items-center justify-center gap-2"
+            >
+              <ShieldCheck size={16} />
+              Decrypt & Mount Vault
+            </button>
+          </form>
+
+          <div className="mt-8 text-center border-t border-slate-800/60 pt-6">
+            <p className="text-slate-500 text-[11px] leading-relaxed">
+              🔒 Your data stays encrypted on disk. Re-identifying via username is handled fully on your local machine.
+            </p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   const pageTitle = activeTab === 'dashboard' ? 'Intelligence Dashboard'
     : activeTab === 'agents' ? 'Sovereign Agents'
@@ -99,15 +201,34 @@ export default function App() {
           </nav>
         </div>
 
-        {/* Bottom Status */}
-        <div className="a2ui-card !p-4 bg-gradient-to-br from-green-50 to-emerald-50/50 !border-green-200/50">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            <span className="text-xs font-bold text-green-700">System Online</span>
+        {/* Bottom User Info & Disconnect */}
+        <div className="border-t border-slate-200/50 pt-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+              <span className="text-[10px] font-black text-slate-800 uppercase tracking-wider">👤 {currentUser}</span>
+            </div>
+            <button 
+              onClick={() => {
+                localStorage.removeItem('cravemap_user');
+                setCurrentUser('');
+                setMemory(null);
+                setLoading(true);
+              }}
+              className="text-[10px] text-rose-500 font-extrabold hover:underline uppercase tracking-wider"
+            >
+              Disconnect
+            </button>
           </div>
-          <p className="text-[11px] text-green-600/80 leading-relaxed">
-            All agents operational. Data encrypted & stored locally.
-          </p>
+          
+          <div className="a2ui-card !p-4 bg-gradient-to-br from-green-50 to-emerald-50/50 !border-green-200/50">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <span className="text-xs font-bold text-green-700">System Online</span>
+            </div>
+            <p className="text-[11px] text-green-600/80 leading-relaxed">
+              All agents operational. Data encrypted & stored locally.
+            </p>
+          </div>
         </div>
       </aside>
 

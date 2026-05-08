@@ -254,7 +254,7 @@ bot.action(/set_recommender_(rest_[0-9]+|[0-9]+)_(.+)/, async (ctx) => {
     } catch (err) {
         console.error("Error setting recommender:", err.message);
     }
-};
+});
 
 // --- NEW ONBOARDING ACTIONS ---
 bot.action(/ob_diet_(veg|nonveg|vegan|egg)/, async (ctx) => {

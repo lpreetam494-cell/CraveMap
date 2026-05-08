@@ -325,20 +325,31 @@ bot.action(/accept_nudge_(.+)/, (ctx) => {
 
 // Component 3: Sovereign Ownership Commands
 bot.command('export_vault', (ctx) => {
-    if (fs.existsSync(MEMORY_PATH)) {
-        ctx.replyWithDocument({ source: MEMORY_PATH, filename: 'my_sovereign_vault.json' }, { caption: "🔐 Here is your completely raw, offline data. You own this." });
-    } else {
-        ctx.reply("Your vault is currently empty.");
+    try {
+        const userId = ctx.from.id;
+        const { getVaultPath } = require('./skills/vault_router');
+        const userVaultPath = getVaultPath(userId);
+        if (fs.existsSync(userVaultPath)) {
+            ctx.replyWithDocument({ source: userVaultPath, filename: 'my_sovereign_vault.json' }, { caption: "🔐 Here is your completely raw, offline data. You own this." });
+        } else {
+            ctx.reply("Your vault is currently empty.");
+        }
+    } catch (e) {
+        ctx.reply("Failed to export vault.");
     }
 });
 
-bot.command('wipe_memory', (ctx) => {
+bot.command('wipe_memory', async (ctx) => {
     try {
-        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
-        memory.restaurants = [];
-        memory.craving_patterns = {};
-        fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
-        ctx.reply("☢️ Nuclear wipe complete. Your Sovereign Vault is now completely blank.");
+        const userId = ctx.from.id;
+        const { getVaultPath } = require('./skills/vault_router');
+        const userVaultPath = getVaultPath(userId);
+        if (fs.existsSync(userVaultPath)) {
+            fs.unlinkSync(userVaultPath);
+            ctx.reply("☢️ Nuclear wipe complete. Your Sovereign Vault is now completely deleted and reset.");
+        } else {
+            ctx.reply("You do not have an active Sovereign Vault to delete.");
+        }
     } catch (e) {
         ctx.reply("Failed to wipe vault.");
     }

@@ -57,8 +57,42 @@ const writeMemory = (data) => fs.writeFileSync(MEMORY_PATH, JSON.stringify(data,
 const { listAllUsers, readUserVault, writeUserVault } = require('./skills/vault_router');
 
 // 1. Get Memory (Dashboard)
-app.get('/api/memory', (req, res) => {
-    res.json(readMemory());
+app.get('/api/memory', async (req, res) => {
+    try {
+        let userId = req.query.userId;
+        const MEMORY_DIR = path.join(__dirname, 'memory');
+        
+        // Dynamic detection of most recently updated user vault
+        if (!userId) {
+            if (fs.existsSync(MEMORY_DIR)) {
+                const files = await fs.promises.readdir(MEMORY_DIR);
+                const userFiles = files.filter(f => f.endsWith('.json') && f !== 'food_memory.json');
+                
+                if (userFiles.length > 0) {
+                    const fileStats = await Promise.all(
+                        userFiles.map(async (file) => {
+                            const filePath = path.join(MEMORY_DIR, file);
+                            const stat = await fs.promises.stat(filePath);
+                            return { file, mtime: stat.mtime };
+                        })
+                    );
+                    fileStats.sort((a, b) => b.mtime - a.mtime);
+                    userId = fileStats[0].file.replace('.json', '');
+                }
+            }
+        }
+        
+        if (userId) {
+            const data = await readUserVault(userId);
+            return res.json(data);
+        }
+        
+        // Fallback to static memory if no custom users are found on disk
+        res.json(readMemory());
+    } catch (err) {
+        console.error("Failed to read memory API:", err.message);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // 1b. Get All Onboarded Users (Agents Grid)

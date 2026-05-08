@@ -22,19 +22,37 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [memory, setMemory] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState([]);
+  const [selectedUser, setSelectedUser] = useState('');
 
   const fetchMemory = () => {
-    fetch(`${API_BASE}/api/memory`)
+    const url = selectedUser 
+      ? `${API_BASE}/api/memory?userId=${selectedUser}`
+      : `${API_BASE}/api/memory`;
+    fetch(url)
       .then(res => res.json())
       .then(data => { setMemory(data); setLoading(false); })
       .catch(() => setLoading(false));
   };
 
+  const fetchUsersList = () => {
+    fetch(`${API_BASE}/api/users`)
+      .then(res => res.json())
+      .then(data => setUsers(data.agents || []))
+      .catch(err => console.error(err));
+  };
+
+  useEffect(() => {
+    fetchUsersList();
+    const userInterval = setInterval(fetchUsersList, 10000);
+    return () => clearInterval(userInterval);
+  }, []);
+
   useEffect(() => {
     fetchMemory();
     const interval = setInterval(fetchMemory, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedUser]);
 
   const pageTitle = activeTab === 'dashboard' ? 'Intelligence Dashboard'
     : activeTab === 'agents' ? 'Sovereign Agents'
@@ -108,9 +126,26 @@ export default function App() {
           </motion.div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-surface px-4 py-2 rounded-xl border border-borderLight/50 shadow-sm">
+            {users.length > 0 && (
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl shadow-sm">
+                <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">Vault:</span>
+                <select
+                  value={selectedUser}
+                  onChange={(e) => setSelectedUser(e.target.value)}
+                  className="bg-transparent border-none text-xs font-bold text-slate-200 focus:outline-none cursor-pointer pr-1"
+                >
+                  <option value="" className="bg-slate-950 text-slate-200">⏱️ Latest Active</option>
+                  {users.map(u => (
+                    <option key={u.userId} value={u.userId} className="bg-slate-950 text-slate-200">
+                      🧬 {u.profile.name} ({u.spotCount} spots)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl shadow-sm">
               <ShieldCheck size={15} className="text-green-500" />
-              <span className="text-xs font-semibold text-textSub">Sovereign Mode</span>
+              <span className="text-xs font-semibold text-slate-300">Sovereign Mode</span>
             </div>
           </div>
         </header>

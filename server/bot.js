@@ -252,6 +252,21 @@ const vetoSessionStore = new Map();
 // Component 1: The Consensus Decision Card (Phase 10: Lobby Manager)
 bot.command('consensus', async (ctx) => {
     saveChatId(ctx);
+    
+    // ENFORCE GROUP CHAT: Consensus can only be triggered in group environments
+    if (ctx.chat.type === 'private') {
+        const botName = ctx.botInfo ? ctx.botInfo.username : 'CraveMap_Sovereign_Bot';
+        return ctx.reply(
+            `👥 *Group Consensus requires a Group Chat!*\n\n` +
+            `To reach a multi-user culinary consensus with your friends or colleagues, please:\n` +
+            `1. ➕ **Create a new Telegram Group** (or open an existing group).\n` +
+            `2. 🤖 **Add this bot** (@${botName}) to the group chat.\n` +
+            `3. 🚀 Run the \`/consensus\` command **inside the group chat** to trigger the live voting lobby!\n\n` +
+            `_Sovereign consensus algorithms require a multi-user group network to run peer-to-peer voting._`,
+            { parse_mode: 'Markdown' }
+        );
+    }
+    
     await lobby_manager.startLobby(ctx);
 });
 

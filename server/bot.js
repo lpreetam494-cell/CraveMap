@@ -326,7 +326,7 @@ bot.command('whoami', async (ctx) => {
         writeUserVault(userId, vault);
 
         const p = vault.user_profile;
-        const msg = `👑 *Your Food Persona*\n\n` +
+        const msg = `👑 *Your Food Persona by Antigravity Sovereign Food Intelligence*\n\n` +
                     `*${persona}*\n\n` +
                     `🍽️ *Diet:* ${p.diet_type}\n` +
                     `🌍 *Cuisines:* ${(p.favorite_cuisines || []).join(', ')}\n` +

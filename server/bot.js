@@ -77,6 +77,53 @@ bot.start(async (ctx) => {
     );
 });
 
+// --- WEB SEARCH SAFETY NET ACTION ---
+bot.action(/add_search_spot_(.+)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const sessionKey = ctx.match[1];
+        const spotObj = discoverySessionStore.get(sessionKey);
+        
+        if (!spotObj) {
+            return ctx.reply("❌ This search result has expired. Please search again!");
+        }
+        
+        const userId = ctx.from.id;
+        const { readUserVault, writeUserVault } = require('./skills/vault_router');
+        const vault = await readUserVault(userId);
+        
+        const newEntry = {
+            id: `rest_${Date.now()}`,
+            name: spotObj.name,
+            cuisine: 'Saved from Web Search',
+            area: spotObj.formatted_address.split(',')[0] || 'Local',
+            lat: spotObj.lat,
+            lng: spotObj.lng,
+            maps_url: spotObj.maps_url,
+            saved_at: new Date().toISOString().split('T')[0],
+            visited: false,
+            rating: null
+        };
+        
+        if (!vault.restaurants) vault.restaurants = [];
+        vault.restaurants.push(newEntry);
+        
+        await writeUserVault(userId, vault);
+        
+        await ctx.editMessageText(
+            `🎉 *Successfully Saved!* \n\n` +
+            `📍 *${spotObj.name}* has been securely encrypted and committed to your personal food brain.\n\n` +
+            `Check your web dashboard to see it on the map!`,
+            { parse_mode: 'Markdown' }
+        );
+        
+        discoverySessionStore.delete(sessionKey);
+    } catch (e) {
+        console.error("Error saving search spot:", e.message);
+        ctx.reply("❌ Failed to save the spot. Please try again.");
+    }
+});
+
 // --- NEW ONBOARDING ACTIONS ---
 bot.action(/ob_diet_(veg|nonveg|vegan|egg)/, async (ctx) => {
     try {
@@ -596,16 +643,50 @@ bot.on('text', async (ctx) => {
             const response = await axios.post('http://localhost:5001/api/search-vault', { query: text, userId: ctx.from.id });
             const { filters, results } = response.data;
             
-            if (results.length === 0) {
-                ctx.reply(`I couldn't find anything matching those filters in your vault. Try a broader search!`);
-            } else {
-                let replyMsg = `Found ${results.length} spot(s) matching your criteria:\n\n`;
+            if (results && results.length > 0) {
+                let replyMsg = `🧠 *Found in your Sovereign Vault:* \n\n`;
                 results.forEach((r, i) => {
                     replyMsg += `${i+1}. **${r.name}** - ${r.area} (${r.cuisine || 'Food'})\n   _${r.vibe || 'No vibe tags'}_\n\n`;
                 });
                 ctx.replyWithMarkdown(replyMsg);
+            } else {
+                // Trigger Web Search Scout Safety Net
+                ctx.reply(`⚠️ No matching spots found in your local vault.\n\n🛰️ *Safety Net:* Triggering Web Search Scout to find "${text}" on the live web...`);
+                
+                const { resolveGeocoordinates } = require('./skills/location_service');
+                const geoSpot = await resolveGeocoordinates(text, 'Bangalore');
+                
+                if (geoSpot && geoSpot.lat && geoSpot.lng) {
+                    const spotObj = {
+                        name: text,
+                        formatted_address: geoSpot.formatted_address || `${text}, Bangalore`,
+                        lat: geoSpot.lat,
+                        lng: geoSpot.lng,
+                        maps_url: geoSpot.maps_url,
+                        source: geoSpot.source
+                    };
+                    
+                    const sessionKey = makeDiscoveryKey(spotObj);
+                    
+                    await ctx.reply(
+                        `🌐 *Found on the live web!* \n\n` +
+                        `*Name:* ${spotObj.name}\n` +
+                        `*Address:* ${spotObj.formatted_address}\n` +
+                        `*Source:* Live ${geoSpot.source === 'google' ? 'Google Places' : 'OpenStreetMap'}\n\n` +
+                        `Would you like to save this spot to your Sovereign Vault?`,
+                        {
+                            parse_mode: 'Markdown',
+                            ...Markup.inlineKeyboard([
+                                [Markup.button.callback('📥 Save to my Sovereign Vault', `add_search_spot_${sessionKey}`)]
+                            ])
+                        }
+                    );
+                } else {
+                    ctx.reply(`❌ Even the live web scout couldn't find "${text}". Try checking the spelling or typing a more specific address!`);
+                }
             }
         } catch (err) {
+            console.error("❌ Search Vault Error:", err.message);
             ctx.reply("❌ Search failed.");
         }
     }

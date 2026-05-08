@@ -511,6 +511,32 @@ bot.on('text', async (ctx) => {
     const text = ctx.message.text;
     const userId = ctx.from.id;
     
+    // Catch username input during onboarding
+    try {
+        const vault = await readUserVault(userId);
+        if (vault.user_profile && vault.user_profile.awaiting_name_input) {
+            const typedName = text.trim();
+            if (typedName.length < 2 || typedName.length > 30 || typedName.includes("/")) {
+                return ctx.reply("⚠️ Please enter a valid name (between 2 and 30 characters, no slashes):");
+            }
+            
+            // Save name to profile and remove wait flag
+            vault.user_profile.name = typedName;
+            delete vault.user_profile.awaiting_name_input;
+            await writeUserVault(userId, vault);
+            
+            // Rename file to <username>.json
+            const { renameVaultFile } = require('./skills/vault_router');
+            await renameVaultFile(userId, typedName);
+            
+            // Proceed to Diet Question
+            const onboarding = require('./skills/onboarding');
+            return onboarding.askDietType(ctx, typedName);
+        }
+    } catch (e) {
+        console.error("Onboarding Name Capture Error:", e.message);
+    }
+    
     // Distinguish between a URL save request and a Natural Language search
     if (text.includes("http") || text.includes("instagram") || text.includes("tiktok")) {
         

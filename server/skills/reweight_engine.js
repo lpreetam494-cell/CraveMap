@@ -5,8 +5,9 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { readUserVault, writeUserVault } = require('./vault_router');
 
-const MEMORY_PATH = path.join(__dirname, '..', 'memory', 'food_memory.json');
+const MEMORY_DIR = path.join(__dirname, '..', 'memory');
 const VETO_THRESHOLD = 3; // Number of same-type vetoes before weight is adjusted
 
 // Maps veto reason to which alignment dimension it penalizes
@@ -17,9 +18,25 @@ const VETO_DIMENSION_MAP = {
     not_in_mood: 'vibe_weight',
 };
 
-const runReweighting = () => {
+const getActiveVaultId = async () => {
+    const files = await fs.promises.readdir(MEMORY_DIR);
+    const userFiles = files.filter(f => f.endsWith('.json') && f !== 'food_memory.json');
+    if (userFiles.length === 0) return null;
+    const fileStats = await Promise.all(
+        userFiles.map(async (file) => {
+            const stat = await fs.promises.stat(path.join(MEMORY_DIR, file));
+            return { file, mtime: stat.mtime };
+        })
+    );
+    fileStats.sort((a, b) => b.mtime - a.mtime);
+    return fileStats[0].file.replace('.json', '');
+};
+
+const runReweighting = async () => {
     try {
-        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+        const userId = await getActiveVaultId();
+        if (!userId) return;
+        const memory = await readUserVault(userId);
         const negativePrefs = memory.negative_preferences || [];
 
         if (negativePrefs.length < VETO_THRESHOLD) return; // Not enough data yet
@@ -81,7 +98,7 @@ const runReweighting = () => {
         if (updated) {
             adjustments.last_updated = new Date().toISOString();
             memory.analytics.alignment_adjustments = adjustments;
-            fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
+            await writeUserVault(userId, memory);
             console.log(`⚖️ Re-weighting complete. New adjustments:`, adjustments);
         }
 
@@ -93,9 +110,10 @@ const runReweighting = () => {
 /**
  * Write a negative preference event to the vault.
  */
-const recordNegativePreference = (spotName, spotCuisine, reason, sessionWeight) => {
+const recordNegativePreference = async (userId, spotName, spotCuisine, reason, sessionWeight) => {
     try {
-        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+        const memory = await readUserVault(userId);
+        if (!memory) return false;
         if (!memory.negative_preferences) memory.negative_preferences = [];
 
         memory.negative_preferences.push({
@@ -111,7 +129,7 @@ const recordNegativePreference = (spotName, spotCuisine, reason, sessionWeight) 
             memory.negative_preferences = memory.negative_preferences.slice(-50);
         }
 
-        fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
+        await writeUserVault(userId, memory);
 
         // Trigger re-weighting asynchronously
         setImmediate(runReweighting);

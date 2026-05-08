@@ -1,6 +1,14 @@
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const axios = require('axios');
 const path = require('path');
+const fs = require('fs');
+const cron = require('node-cron');
+const { evaluateAndTriggerAgency } = require('./skills/agency_daemon');
+const { resolveMood, MOOD_PROFILES } = require('./skills/mood_profiles');
+const { recordNegativePreference } = require('./skills/reweight_engine');
+const onboarding = require('./skills/onboarding');
+const lobby_manager = require('./skills/lobby_manager');
+const { readUserVault, writeUserVault } = require('./skills/vault_router');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 // Secure backend communication
@@ -24,34 +32,228 @@ const makeDiscoveryKey = (spot) => {
     return key;
 };
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+// Dynamic vault path helper — no hardcoded food_memory.json
+const { readUserVault: _readVault, writeUserVault: _writeVault } = require('./skills/vault_router');
 
-console.log("🤖 Sovereign Bot: Initializing...");
+console.log("🤖 Sovereign Bot: Initializing Phase 8 Behavioral Feedback...");
 
-bot.start((ctx) => {
-    ctx.reply("Welcome to CraveMap Sovereign. Send me a restaurant name, a link, or a location to save it to your food brain.");
+// Utility to save chat ID to the user's own vault
+const saveChatId = async (ctx) => {
+    try {
+        const userId = ctx.from?.id;
+        if (!userId) return;
+        const memory = await _readVault(userId);
+        if (!memory) return;
+        if (!memory.analytics) memory.analytics = {};
+        if (memory.analytics.telegram_chat_id !== ctx.chat.id) {
+            memory.analytics.telegram_chat_id = ctx.chat.id;
+            await _writeVault(userId, memory);
+        }
+    } catch (e) {}
+};
+
+// Helper to resolve city from a user's vault profile (fallback: 'Bangalore')
+const getUserCity = async (userId) => {
+    try {
+        const vault = await _readVault(userId);
+        return vault?.user_profile?.city || 'Bangalore';
+    } catch (e) {
+        return 'Bangalore';
+    }
+};
+
+bot.use((ctx, next) => {
+    console.log("➡️ Received Update:", ctx.updateType, ctx.message?.text);
+    return next();
 });
 
 bot.start(async (ctx) => {
     saveChatId(ctx);
     const userId = ctx.from.id;
+    let name = "Foodie";
     try {
         const vault = await readUserVault(userId);
         if (!vault.user_profile || !vault.user_profile.onboarding_complete) {
+            // Check if name is already populated (e.g. from a wiped vault profile)
+            if (vault.user_profile && vault.user_profile.name && !vault.user_profile.awaiting_name_input) {
+                const onboarding = require('./skills/onboarding');
+                return onboarding.askDietType(ctx, vault.user_profile.name);
+            }
             return onboarding.startOnboarding(ctx);
+        }
+        if (vault.user_profile.name) {
+            name = vault.user_profile.name;
         }
     } catch (e) {}
 
     ctx.reply(
-        "Welcome back to *CraveMap Sovereign* 🧠\n\n" +
-        "*Commands:*\n" +
-        "/whoami — View your Food Persona\n" +
-        "/discover Koramangala — Scout new restaurants\n" +
-        "/consensus — Group decision lobby\n" +
-        "/export\\_vault — Download your data\n" +
-        "/wipe\\_memory — Nuclear wipe\n\n" +
-        "Send a photo of your meal and I will verify the visit automatically.",
+        `Welcome back, *${name}* to *CraveMap Sovereign* 🧠\n\n` +
+        `*Commands:*\n` +
+        `/whoami — View your Food Persona\n` +
+        `/discover Koramangala — Scout new restaurants\n` +
+        `/consensus — Group decision lobby\n` +
+        `/export\\_vault — Download your data\n` +
+        `/wipe\\_memory — Nuclear wipe\n\n` +
+        `Send a photo of your meal and I will verify the visit automatically.`,
         { parse_mode: 'Markdown' }
     );
+});
+
+// Dynamic Web Scout Enrichment via Groq LLM
+const enrichWebScoutRestaurant = async (name, address) => {
+    try {
+        if (!process.env.GROQ_API_KEY) {
+            return { cuisine: 'Mixed', vibe: 'Local gem' };
+        }
+        const Groq = require('groq-sdk');
+        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+        const completion = await groq.chat.completions.create({
+            model: 'llama-3.3-70b-versatile',
+            response_format: { type: 'json_object' },
+            messages: [
+                {
+                    role: 'system',
+                    content: `You are a restaurant data enricher. For the given restaurant name and address, infer the most likely cuisine type and a short list of vibe/atmosphere tags.
+Return JSON format: {"cuisine": "string", "vibe": "string of 2-3 tags separated by commas"}`
+                },
+                {
+                    role: 'user',
+                    content: `Restaurant Name: "${name}"\nAddress: "${address}"`
+                }
+            ],
+            temperature: 0.1,
+            max_tokens: 300
+        });
+        const result = JSON.parse(completion.choices[0].message.content);
+        return {
+            cuisine: result.cuisine || 'Mixed',
+            vibe: result.vibe || 'Local gem'
+        };
+    } catch (e) {
+        console.error("Failed to enrich restaurant with LLM:", e.message);
+        return { cuisine: 'Mixed', vibe: 'Local gem' };
+    }
+};
+
+// --- WEB SEARCH SAFETY NET ACTION ---
+bot.action(/add_search_spot_(.+)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const sessionKey = ctx.match[1];
+        const spotObj = discoverySessionStore.get(sessionKey);
+        
+        if (!spotObj) {
+            return ctx.reply("❌ This search result has expired. Please search again!");
+        }
+        
+        const userId = ctx.from.id;
+        const { readUserVault, writeUserVault } = require('./skills/vault_router');
+        const vault = await readUserVault(userId);
+        
+        // Notify user about intelligence parsing
+        const waitMsg = await ctx.reply("🧠 *Sovereign Intelligence:* Inferring cuisine and vibe tags for your vault...");
+        const enrichment = await enrichWebScoutRestaurant(spotObj.name, spotObj.formatted_address);
+        try { await ctx.telegram.deleteMessage(ctx.chat.id, waitMsg.message_id); } catch(e) {}
+
+        const newEntry = {
+            id: `rest_${Date.now()}`,
+            name: spotObj.name,
+            cuisine: enrichment.cuisine,
+            vibe: enrichment.vibe,
+            area: spotObj.formatted_address.split(',')[0] || 'Local',
+            lat: spotObj.lat,
+            lng: spotObj.lng,
+            maps_url: spotObj.maps_url,
+            saved_at: new Date().toISOString().split('T')[0],
+            visited: false,
+            rating: null
+        };
+        
+        if (!vault.restaurants) vault.restaurants = [];
+        vault.restaurants.push(newEntry);
+        
+        await writeUserVault(userId, vault);
+        
+        await ctx.editMessageText(
+            `🎉 *Successfully Saved with AI Enrichment!* \n\n` +
+            `📍 **${spotObj.name}**\n` +
+            `🥘 *Cuisine:* ${enrichment.cuisine}\n` +
+            `✨ *Vibe:* ${enrichment.vibe}\n\n` +
+            `Securely encrypted and committed to your personal food brain.\n` +
+            `Check your web dashboard to see it on the map!`,
+            { parse_mode: 'Markdown' }
+        );
+        
+        discoverySessionStore.delete(sessionKey);
+        
+        // Dynamic prompt for who recommended this spot
+        await promptRecommender(ctx, newEntry.id, spotObj.name, userId);
+        
+    } catch (e) {
+        console.error("Error saving search spot:", e.message);
+        ctx.reply("❌ Failed to save the spot. Please try again.");
+    }
+});
+
+// --- SOCIAL RECOMMENDER ATTACHMENT ---
+const promptRecommender = async (ctx, restaurantId, restaurantName, userId) => {
+    try {
+        const { listAllUsers } = require('./skills/vault_router');
+        const allUsers = await listAllUsers();
+        
+        // Filter out current user and invalid names
+        const friends = allUsers.filter(u => u.userId !== userId.toString() && u.profile.name && u.profile.name !== "No Name");
+        
+        const buttons = [];
+        // Dynamic peer options from the server circle!
+        friends.forEach(f => {
+            buttons.push([Markup.button.callback(`⚡ Recommended by ${f.profile.name}`, `set_recommender_${restaurantId}_${f.profile.name}`)]);
+        });
+        
+        // Default options
+        buttons.push([Markup.button.callback('👤 Found it myself (Myself)', `set_recommender_${restaurantId}_Myself`)]);
+        buttons.push([Markup.button.callback('👥 Another Friend', `set_recommender_${restaurantId}_Friend`)]);
+        
+        await ctx.reply(
+            `❓ *Who recommended "${restaurantName}" to you?*\n` +
+            `This maps your social trust circle on your CraveMap dashboard topology!`,
+            {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard(buttons)
+            }
+        );
+    } catch (err) {
+        console.error("Error prompting recommender:", err.message);
+    }
+};
+
+bot.action(/set_recommender_(rest_[0-9]+|[0-9]+)_(.+)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery('Saving trust...');
+        const restaurantId = ctx.match[1];
+        const recommender = ctx.match[2];
+        const userId = ctx.from.id;
+        
+        const { readUserVault, writeUserVault } = require('./skills/vault_router');
+        const vault = await readUserVault(userId);
+        
+        const spot = (vault.restaurants || []).find(r => r.id === restaurantId);
+        if (spot) {
+            spot.source = (recommender === 'Myself' ? 'none' : recommender);
+            await writeUserVault(userId, vault);
+            
+            await ctx.editMessageText(
+                `🤝 *Trust Connection Registered!* \n\n` +
+                `📍 **${spot.name}** is now linked to **${recommender === 'Myself' ? 'your own discovery' : recommender}** in your social taste vault.\n` +
+                `Watch this trust link light up in your Social Taste Graph!`,
+                { parse_mode: 'Markdown' }
+            );
+        } else {
+            ctx.reply("❌ Unable to update (restaurant spot not found in your vault).");
+        }
+    } catch (err) {
+        console.error("Error setting recommender:", err.message);
+    }
 });
 
 // --- NEW ONBOARDING ACTIONS ---
@@ -173,6 +375,21 @@ const vetoSessionStore = new Map();
 // Component 1: The Consensus Decision Card (Phase 10: Lobby Manager)
 bot.command('consensus', async (ctx) => {
     saveChatId(ctx);
+    
+    // ENFORCE GROUP CHAT: Consensus can only be triggered in group environments
+    if (ctx.chat.type === 'private') {
+        const botName = ctx.botInfo ? ctx.botInfo.username : 'CraveMap_Sovereign_Bot';
+        return ctx.reply(
+            `👥 *Group Consensus requires a Group Chat!*\n\n` +
+            `To reach a multi-user culinary consensus with your friends or colleagues, please:\n` +
+            `1. ➕ **Create a new Telegram Group** (or open an existing group).\n` +
+            `2. 🤖 **Add this bot** (@${botName}) to the group chat.\n` +
+            `3. 🚀 Run the \`/consensus\` command **inside the group chat** to trigger the live voting lobby!\n\n` +
+            `_Sovereign consensus algorithms require a multi-user group network to run peer-to-peer voting._`,
+            { parse_mode: 'Markdown' }
+        );
+    }
+    
     await lobby_manager.startLobby(ctx);
 });
 
@@ -302,20 +519,52 @@ bot.action(/accept_nudge_(.+)/, (ctx) => {
 
 // Component 3: Sovereign Ownership Commands
 bot.command('export_vault', (ctx) => {
-    if (fs.existsSync(MEMORY_PATH)) {
-        ctx.replyWithDocument({ source: MEMORY_PATH, filename: 'my_sovereign_vault.json' }, { caption: "🔐 Here is your completely raw, offline data. You own this." });
-    } else {
-        ctx.reply("Your vault is currently empty.");
+    try {
+        const userId = ctx.from.id;
+        const { getVaultPath } = require('./skills/vault_router');
+        const userVaultPath = getVaultPath(userId);
+        if (fs.existsSync(userVaultPath)) {
+            ctx.replyWithDocument({ source: userVaultPath, filename: 'my_sovereign_vault.json' }, { caption: "🔐 Here is your completely raw, offline data. You own this." });
+        } else {
+            ctx.reply("Your vault is currently empty.");
+        }
+    } catch (e) {
+        ctx.reply("Failed to export vault.");
     }
 });
 
-bot.command('wipe_memory', (ctx) => {
+bot.command('wipe_memory', async (ctx) => {
     try {
-        const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
-        memory.restaurants = [];
-        memory.craving_patterns = {};
-        fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2));
-        ctx.reply("☢️ Nuclear wipe complete. Your Sovereign Vault is now completely blank.");
+        const userId = ctx.from.id;
+        const { getVaultPath, readUserVault, writeUserVault } = require('./skills/vault_router');
+        const userVaultPath = getVaultPath(userId);
+        
+        if (fs.existsSync(userVaultPath)) {
+            const vault = await readUserVault(userId);
+            const name = vault.user_profile?.name || "Preetam";
+            
+            // Keep identity, reset onboarding and clean restaurants list
+            vault.user_profile = {
+                telegram_id: userId,
+                telegram_username: ctx.from?.username || 'Unknown',
+                name: name,
+                onboarded_at: new Date().toISOString(),
+                awaiting_name_input: false, // Don't ask them to re-type their name
+                onboarding_complete: false
+            };
+            
+            vault.restaurants = [];
+            vault.craving_patterns = {};
+            vault.social_graph = {};
+            vault.visit_history = [];
+            vault.analytics = {};
+            vault.negative_preferences = [];
+            
+            await writeUserVault(userId, vault);
+            ctx.reply(`☢️ Nuclear wipe complete. Your Sovereign Vault data has been wiped, but your profile name (*${name}*) is preserved.\n\nType /start to complete onboarding!`, { parse_mode: 'Markdown' });
+        } else {
+            ctx.reply("You do not have an active Sovereign Vault to wipe.");
+        }
     } catch (e) {
         ctx.reply("Failed to wipe vault.");
     }
@@ -484,8 +733,84 @@ bot.command('dev_trigger_agency', async (ctx) => {
 const rateLimiter = new Map();
 
 bot.on('text', async (ctx) => {
+    saveChatId(ctx);
     const text = ctx.message.text;
     const userId = ctx.from.id;
+    
+    // Catch username input during onboarding
+    try {
+        const vault = await readUserVault(userId);
+        if (vault.user_profile && vault.user_profile.awaiting_name_input) {
+            const typedName = text.trim();
+            if (typedName.length < 2 || typedName.length > 30 || typedName.includes("/")) {
+                return ctx.reply("⚠️ Please enter a valid name (between 2 and 30 characters, no slashes):");
+            }
+            
+            const sanitized = typedName.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+            const MEMORY_DIR = path.join(__dirname, 'memory');
+            const targetPath = path.join(MEMORY_DIR, `${sanitized}.json`);
+            
+            // SECURITY/INTELLIGENCE: If user-vault already exists on disk, link and load it instantly!
+            if (fs.existsSync(targetPath)) {
+                try {
+                    const existingDataStr = fs.readFileSync(targetPath, 'utf8');
+                    const existingData = JSON.parse(existingDataStr);
+                    
+                    if (existingData.user_profile) {
+                        // Associate current Telegram ID to this existing vault!
+                        existingData.user_profile.telegram_id = userId;
+                        existingData.user_profile.telegram_username = ctx.from?.username || 'Unknown';
+                        delete existingData.user_profile.awaiting_name_input;
+                        
+                        // Save the updated vault back to disk
+                        const { writeUserVault } = require('./skills/vault_router');
+                        await writeUserVault(sanitized, existingData);
+                        
+                        // Clean up temporary user_<id>.json if it exists
+                        const tempPath = path.join(MEMORY_DIR, `user_${userId}.json`);
+                        if (fs.existsSync(tempPath)) {
+                            fs.unlinkSync(tempPath);
+                        }
+                        
+                        let spotCount = 0;
+                        if (Array.isArray(existingData.restaurants)) {
+                            spotCount = existingData.restaurants.length;
+                        } else if (typeof existingData.restaurants === 'string') {
+                            try {
+                                const cryptoUtil = require('./utils/crypto');
+                                const dec = JSON.parse(cryptoUtil.decrypt(existingData.restaurants));
+                                spotCount = Array.isArray(dec) ? dec.length : 0;
+                            } catch (e) {}
+                        }
+                        
+                        return ctx.reply(
+                            `🔑 *Sovereign Vault Linked Successfully!* 🔐\n\n` +
+                            `Welcome back, *${existingData.user_profile.name}*! I found your existing vault file on disk with *${spotCount} saved spot(s)*.\n\n` +
+                            `Your profile and data are fully loaded and active. Run /whoami or search your vault anytime!`,
+                            { parse_mode: 'Markdown' }
+                        );
+                    }
+                } catch (err) {
+                    console.error("Existing vault merge error:", err.message);
+                }
+            }
+            
+            // Save name to profile and remove wait flag
+            vault.user_profile.name = typedName;
+            delete vault.user_profile.awaiting_name_input;
+            await writeUserVault(userId, vault);
+            
+            // Rename file to <username>.json
+            const { renameVaultFile } = require('./skills/vault_router');
+            await renameVaultFile(userId, typedName);
+            
+            // Proceed to Diet Question
+            const onboarding = require('./skills/onboarding');
+            return onboarding.askDietType(ctx, typedName);
+        }
+    } catch (e) {
+        console.error("Onboarding Name Capture Error:", e.message);
+    }
     
     // Distinguish between a URL save request and a Natural Language search
     if (text.includes("http") || text.includes("instagram") || text.includes("tiktok")) {
@@ -507,7 +832,10 @@ bot.on('text', async (ctx) => {
                 } else {
                     const entry = response.data.entry;
                     const mapsLink = entry.maps_url ? `\n🗺️ [Google Maps](${entry.maps_url})` : '';
-                    ctx.reply(`📍 Saved to Sovereign Bucket!\n\nName: ${entry.name}\nCuisine: ${entry.cuisine}\nArea: ${entry.area}${mapsLink}\n\nCheck your dashboard for behavioral insights.`, { parse_mode: 'Markdown' });
+                    await ctx.reply(`📍 Saved to Sovereign Bucket!\n\nName: ${entry.name}\nCuisine: ${entry.cuisine}\nArea: ${entry.area}${mapsLink}\n\nCheck your dashboard for behavioral insights.`, { parse_mode: 'Markdown' });
+                    
+                    // Trigger dynamic recommender prompt!
+                    await promptRecommender(ctx, entry.id, entry.name, userId);
                 }
             } else {
                 // Show actual error from API (Instagram auth, Gemini limits, etc.)
@@ -516,13 +844,11 @@ bot.on('text', async (ctx) => {
             }
         } catch (error) {
             console.error("❌ Instagram Processing Error:", error.message);
-            // More informative error messages
             if (error.code === 'ECONNREFUSED') {
                 ctx.reply("❌ Backend API is unreachable. Please try again in a moment.");
             } else if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
                 ctx.reply("⏱️ Video processing timed out. Try:\n1. A shorter video/reel\n2. Just the restaurant name\n3. A Google Maps link");
             } else if (error.response?.status === 400) {
-                // Backend returned specific error (Instagram auth, Gemini limit, etc)
                 ctx.reply(error.response.data?.message || "🛡️ Can't process this video. Try sending the restaurant name instead!");
             } else {
                 ctx.reply("🛡️ Video processing failed.\n\n**Alternatives:**\n📝 Send restaurant name\n🗺️ Share Google Maps link\n📸 Upload a food photo");
@@ -535,16 +861,51 @@ bot.on('text', async (ctx) => {
             const response = await axios.post('http://localhost:5001/api/search-vault', { query: text, userId: ctx.from.id });
             const { filters, results } = response.data;
             
-            if (results.length === 0) {
-                ctx.reply(`I couldn't find anything matching those filters in your vault. Try a broader search!`);
-            } else {
-                let replyMsg = `Found ${results.length} spot(s) matching your criteria:\n\n`;
+            if (results && results.length > 0) {
+                let replyMsg = `🧠 *Found in your Sovereign Vault:* \n\n`;
                 results.forEach((r, i) => {
                     replyMsg += `${i+1}. **${r.name}** - ${r.area} (${r.cuisine || 'Food'})\n   _${r.vibe || 'No vibe tags'}_\n\n`;
                 });
                 ctx.replyWithMarkdown(replyMsg);
+            } else {
+                // Trigger Web Search Scout Safety Net
+                ctx.reply(`⚠️ No matching spots found in your local vault.\n\n🛰️ *Safety Net:* Triggering Web Search Scout to find "${text}" on the live web...`);
+                
+                const { resolveGeocoordinates } = require('./skills/location_service');
+                const userCity = await getUserCity(ctx.from.id);
+                const geoSpot = await resolveGeocoordinates(text, userCity);
+                
+                if (geoSpot && geoSpot.lat && geoSpot.lng) {
+                    const spotObj = {
+                        name: text,
+                        formatted_address: geoSpot.formatted_address || `${text}, ${userCity}`,
+                        lat: geoSpot.lat,
+                        lng: geoSpot.lng,
+                        maps_url: geoSpot.maps_url,
+                        source: geoSpot.source
+                    };
+                    
+                    const sessionKey = makeDiscoveryKey(spotObj);
+                    
+                    await ctx.reply(
+                        `🌐 *Found on the live web!* \n\n` +
+                        `*Name:* ${spotObj.name}\n` +
+                        `*Address:* ${spotObj.formatted_address}\n` +
+                        `*Source:* Live ${geoSpot.source === 'google' ? 'Google Places' : 'OpenStreetMap'}\n\n` +
+                        `Would you like to save this spot to your Sovereign Vault?`,
+                        {
+                            parse_mode: 'Markdown',
+                            ...Markup.inlineKeyboard([
+                                [Markup.button.callback('📥 Save to my Sovereign Vault', `add_search_spot_${sessionKey}`)]
+                            ])
+                        }
+                    );
+                } else {
+                    ctx.reply(`❌ Even the live web scout couldn't find "${text}". Try checking the spelling or typing a more specific address!`);
+                }
             }
         } catch (err) {
+            console.error("❌ Search Vault Error:", err.message);
             ctx.reply("❌ Search failed.");
         }
     }
@@ -571,20 +932,117 @@ bot.on('photo', async (ctx) => {
     const processingMsg = await ctx.reply('📸 *Analysing your photo* to identify the restaurant...', { parse_mode: 'Markdown' });
 
     try {
-        const response = await axios.post('http://localhost:5000/api/save', { text });
-        
-        if (response.data.success) {
-            const entry = response.data.entry;
-            ctx.reply(`📍 Saved to Sovereign Bucket!\n\nName: ${entry.name}\nCuisine: ${entry.cuisine}\nArea: ${entry.area}\n\nCheck your dashboard for behavioral insights.`);
-        } else {
-            ctx.reply(`🤔 ${response.data.message}`);
+        // Download photo from Telegram
+        const fileLink = await ctx.telegram.getFileLink(targetPhoto.file_id);
+        const tmpPath = path.join(TMP_DIR, `verify_${Date.now()}.jpg`);
+
+        const response = await axios.get(fileLink.href, { responseType: 'arraybuffer' });
+        fs.writeFileSync(tmpPath, Buffer.from(response.data));
+
+        // Call verify-visit API
+        const verifyRes = await axios.post('http://localhost:5001/api/verify-visit', { imagePath: tmpPath, userId: ctx.from.id });
+        const result = verifyRes.data;
+
+        if (result.gemini_unavailable) {
+            // Graceful fallback: offer manual confirmation
+            return ctx.reply(
+                '⚠️ *Vision engine is temporarily busy.* Want to mark a visit manually?\n\nReply with the restaurant name and I\'ll update your vault.',
+                { parse_mode: 'Markdown' }
+            );
         }
-    } catch (error) {
-        console.error("❌ Bot Error:", error.message);
-        ctx.reply("📍 I've saved this offline! It will sync to your Sovereign Food Brain shortly.");
+
+        if (!result.success || !result.identified) {
+            // Check if there are proactive cuisine-based suggestions!
+            if (result.cuisine_visible && Array.isArray(result.suggested_matches) && result.suggested_matches.length > 0) {
+                const matchButtons = result.suggested_matches.slice(0, 3).map(r => {
+                    const base64Name = Buffer.from(r.name).toString('base64').replace(/=/g, '');
+                    return [Markup.button.callback(`✅ Check-in at ${r.name}`, `vchk_${base64Name}`)];
+                });
+                
+                return ctx.reply(
+                    `🤔 *I couldn't identify the specific restaurant name from this photo alone (confidence: 0%), but I see some delicious ${result.cuisine_visible}!* \n\n` +
+                    `Would you like to check in to one of your saved *${result.cuisine_visible}* spots from your vault?`,
+                    {
+                        parse_mode: 'Markdown',
+                        ...Markup.inlineKeyboard(matchButtons)
+                    }
+                );
+            }
+
+            return ctx.reply(
+                `🤔 I couldn't confidently identify a restaurant from this photo (confidence: ${Math.round((result.confidence || 0) * 100)}%).\n\n` +
+                `Try a clearer shot of the signage, menu, or food. Or type the restaurant name to save manually.`
+            );
+        }
+
+        if (!result.matched_in_vault) {
+            // Identified but not in vault — offer to save as new discovery
+            return ctx.replyWithMarkdown(
+                `👀 I think this is *${result.restaurant_name}* (${Math.round(result.confidence * 100)}% confident).\n\n` +
+                `_${result.cues}_\n\n` +
+                `This spot isn't in your vault yet. Want to save it?`,
+                Markup.inlineKeyboard([[
+                    Markup.button.callback(`💾 Save ${result.restaurant_name}`, `sdsc_new_${Buffer.from(result.restaurant_name).toString('base64').slice(0, 20)}`)
+                ]])
+            );
+        }
+
+        // Matched and marked visited ✅
+        const spot = result.restaurant;
+        return ctx.replyWithMarkdown(
+            `✅ *Visit Verified!*\n\n` +
+            `📍 *${spot.name}* has been marked as visited in your vault.\n` +
+            `🥘 ${spot.cuisine || 'Unknown cuisine'}\n\n` +
+            `_Visual cues: ${result.cues}_\n\n` +
+            `Your Craving Cycle timer for this cuisine has been reset. 🔄`
+        );
+
+    } catch (err) {
+        ctx.reply('❌ Photo verification failed: ' + err.message);
     }
 });
 
+// Vision Proactive Check-in Confirmation Action
+bot.action(/vchk_(.+)/, async (ctx) => {
+    ctx.answerCbQuery('Marking visited...');
+    const userId = ctx.from.id;
+    const base64Name = ctx.match[1];
+    
+    try {
+        const { readUserVault, writeUserVault } = require('./skills/vault_router');
+        const vault = await readUserVault(userId);
+        
+        // Find matching restaurant by comparing base64 strings to support arbitrary casing/accents
+        const targetIdx = vault.restaurants.findIndex(r => {
+            const b64 = Buffer.from(r.name).toString('base64').replace(/=/g, '');
+            return b64 === base64Name;
+        });
+        
+        if (targetIdx !== -1) {
+            const restaurantName = vault.restaurants[targetIdx].name;
+            vault.restaurants[targetIdx].visited = true;
+            
+            // Reset craving cycle for this cuisine
+            const cuisine = vault.restaurants[targetIdx].cuisine;
+            if (cuisine) {
+                const cuisines = cuisine.split(',').map(c => c.trim().toLowerCase());
+                if (!vault.craving_patterns) vault.craving_patterns = {};
+                cuisines.forEach(c => {
+                    vault.craving_patterns[c] = { last_satisfied: new Date().toISOString(), cooldown_days: 5 };
+                });
+            }
+            
+            await writeUserVault(userId, vault);
+            ctx.reply(`✅ *Visit Verified!*\n\n📍 *${restaurantName}* has been marked as visited in your vault. Your Craving Cycle timer has been reset! 🔄`, { parse_mode: 'Markdown' });
+        } else {
+            ctx.reply(`⚠️ Spot not found in your vault.`);
+        }
+    } catch (e) {
+        ctx.reply("❌ Check-in failed: " + e.message);
+    }
+});
+
+console.log("REACHED BOT.LAUNCH");
 bot.launch()
     .then(() => console.log("🚀 Sovereign Bot is LIVE on Telegram"))
     .catch((err) => console.error("❌ Bot failed to launch:", err.message));

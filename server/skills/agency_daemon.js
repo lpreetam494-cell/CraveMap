@@ -2,20 +2,47 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const { getProactiveTriggers, enforceVariety } = require('./lifestyle_operator');
+const { listAllUsers, readUserVault } = require('./vault_router');
 
-const MEMORY_PATH = path.join(__dirname, '..', 'memory', 'food_memory.json');
+const MEMORY_DIR = path.join(__dirname, '..', 'memory');
+const API_PORT = process.env.PORT || 5001;
+
+// Dynamically resolve the most recently active user vault
+const getActiveVault = async () => {
+    try {
+        const files = await fs.promises.readdir(MEMORY_DIR);
+        const userFiles = files.filter(f => f.endsWith('.json') && f !== 'food_memory.json');
+        if (userFiles.length === 0) return null;
+        const fileStats = await Promise.all(
+            userFiles.map(async (file) => {
+                const stat = await fs.promises.stat(path.join(MEMORY_DIR, file));
+                return { file, mtime: stat.mtime };
+            })
+        );
+        fileStats.sort((a, b) => b.mtime - a.mtime);
+        const userId = fileStats[0].file.replace('.json', '');
+        const vault = await readUserVault(userId);
+        return vault;
+    } catch (e) {
+        return null;
+    }
+};
 
 const evaluateAndTriggerAgency = async (bot, forceTest = false) => {
     console.log("🕒 Agency Daemon: Waking up to evaluate state...");
-    if (!fs.existsSync(MEMORY_PATH)) return;
+    const memory = await getActiveVault();
+    if (!memory) {
+        console.log("🕒 Agency Daemon: No active vaults found. Sleeping.");
+        return;
+    }
 
-    const memory = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
     const chatId = memory.analytics?.telegram_chat_id;
     
     if (!chatId) {
         console.log("🕒 Agency Daemon: No Telegram Chat ID linked. Sleeping.");
         return;
     }
+
 
     try {
         // 1. Gather Context
@@ -82,7 +109,7 @@ const evaluateAndTriggerAgency = async (bot, forceTest = false) => {
         console.log("🚨 Agency Daemon: Triggering Proactive Nudge! Reason:", nudgeReason);
 
         // 4. Trigger Social Brain
-        const response = await axios.post('http://localhost:5001/api/group-decision', { constraints: forcedConstraints });
+        const response = await axios.post(`http://localhost:${API_PORT}/api/group-decision`, { constraints: forcedConstraints });
         const result = response.data;
 
         if (!result.best_option) {

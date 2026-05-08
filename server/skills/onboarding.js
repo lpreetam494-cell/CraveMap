@@ -1,5 +1,5 @@
 const { Markup } = require('telegraf');
-const { updateUserProfile, readUserVault } = require('./vault_router');
+const { updateUserProfile, readUserVault, writeUserVault, createFreshVault } = require('./vault_router');
 
 // In-memory store for multi-select cuisine session
 const cuisineSelections = new Map();
@@ -17,18 +17,29 @@ const CUISINE_OPTIONS = [
 
 const startOnboarding = async (ctx) => {
     const userId = ctx.from.id;
-    const firstName = ctx.from?.first_name || 'Foodie';
     const username = ctx.from?.username || 'Unknown';
 
-    // Save identity instantly
-    updateUserProfile(userId, 'name', firstName);
-    updateUserProfile(userId, 'telegram_username', username);
-    updateUserProfile(userId, 'telegram_id', userId);
-    updateUserProfile(userId, 'onboarded_at', new Date().toISOString());
+    // Save identity instantly with awaiting_name_input
+    const fresh = createFreshVault();
+    fresh.user_profile = {
+        telegram_id: userId,
+        telegram_username: username,
+        onboarded_at: new Date().toISOString(),
+        awaiting_name_input: true
+    };
+    
+    await writeUserVault(userId, fresh);
 
     await ctx.reply(
-        `🧬 *Welcome to CraveMap, ${firstName}!*\n\n` +
-        `I need to understand your food personality. Just 4 quick taps — no typing needed.\n\n` +
+        `🧬 *Welcome to CraveMap Sovereign!* 🧠\n\n` +
+        `Before we begin, please type and send your **Name** below so I can set up your personal, encrypted Sovereign Vault file:`
+    );
+};
+
+const askDietType = async (ctx, name) => {
+    await ctx.reply(
+        `🧬 *Thank you, ${name}! Your Sovereign Vault file has been securely initialized.* 🔐\n\n` +
+        `Now, let's complete your food personality setup.\n\n` +
         `*Step 1 of 4: What do you eat?*`,
         {
             parse_mode: 'Markdown',
@@ -180,6 +191,7 @@ const handleStyle = async (ctx, style) => {
 
 module.exports = {
     startOnboarding,
+    askDietType,
     handleDietType,
     handleCuisineToggle,
     handleCuisineDone,

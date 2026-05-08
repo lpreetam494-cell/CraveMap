@@ -50,14 +50,31 @@ class VaultWriteQueue {
 
 const writeQueue = new VaultWriteQueue();
 
-/**
- * Returns the vault file path for a specific Telegram user.
- */
 const getVaultPath = (telegramUserId) => {
-    // SECURITY: Prevent Path Traversal by strictly enforcing alphanumeric characters
-    if (!/^[a-zA-Z0-9_-]+$/.test(telegramUserId.toString())) {
-        throw new Error("Invalid userId format: Path Traversal Attempt Blocked");
+    // If it's a string username (like 'rohan_vault' or 'preetam'), use it directly
+    if (isNaN(telegramUserId)) {
+        const name = telegramUserId.toString().replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+        return path.join(MEMORY_DIR, name.endsWith('.json') ? name : `${name}.json`);
     }
+
+    // It's a numeric Telegram ID! Let's search all json files in MEMORY_DIR for a matching telegram_id
+    try {
+        const files = fs.readdirSync(MEMORY_DIR);
+        for (const file of files) {
+            if (file.endsWith('.json') && file !== 'food_memory.json') {
+                try {
+                    const filePath = path.join(MEMORY_DIR, file);
+                    const content = fs.readFileSync(filePath, 'utf8');
+                    const parsed = JSON.parse(content);
+                    if (parsed.user_profile && parsed.user_profile.telegram_id == telegramUserId) {
+                        return filePath;
+                    }
+                } catch (e) {}
+            }
+        }
+    } catch (err) {}
+
+    // Fallback if no matching file is found
     return path.join(MEMORY_DIR, `user_${telegramUserId}.json`);
 };
 
@@ -160,13 +177,13 @@ const listAllUsers = async () => {
     if (!fs.existsSync(MEMORY_DIR)) return users;
 
     const files = await fs.promises.readdir(MEMORY_DIR);
-    const userFiles = files.filter(f => f.startsWith('user_') && f.endsWith('.json'));
+    const userFiles = files.filter(f => f.endsWith('.json') && f !== 'food_memory.json');
     
     for (const file of userFiles) {
         try {
             const dataStr = await fs.promises.readFile(path.join(MEMORY_DIR, file), 'utf8');
             const data = JSON.parse(dataStr);
-            const userId = file.replace('user_', '').replace('.json', '');
+            const userId = file.replace('.json', '');
             if (data.user_profile && data.user_profile.name) {
                 // Determine spot count based on whether it's encrypted or plaintext array
                 let spotCount = 0;
@@ -190,6 +207,22 @@ const listAllUsers = async () => {
     return users;
 };
 
+const renameVaultFile = async (telegramUserId, newName) => {
+    const sanitized = newName.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+    const oldPath = getVaultPath(telegramUserId);
+    const newPath = path.join(MEMORY_DIR, `${sanitized}.json`);
+    
+    if (fs.existsSync(oldPath)) {
+        const data = await fs.promises.readFile(oldPath, 'utf8');
+        await fs.promises.writeFile(newPath, data);
+        await fs.promises.unlink(oldPath);
+        console.log(`🔄 Renamed vault for user ${telegramUserId} to ${sanitized}.json`);
+    } else {
+        const fresh = createFreshVault();
+        await fs.promises.writeFile(newPath, JSON.stringify(fresh, null, 2));
+    }
+};
+
 module.exports = {
     getVaultPath,
     readUserVault,
@@ -197,5 +230,6 @@ module.exports = {
     writeUserVaultSync,
     updateUserProfile,
     listAllUsers,
-    createFreshVault
+    createFreshVault,
+    renameVaultFile
 };

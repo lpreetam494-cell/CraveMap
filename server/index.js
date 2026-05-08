@@ -7,10 +7,14 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 // Agent Skills
 const { extractRestaurantData } = require('./skills/social_hunter');
+const { discoverRestaurants, runDiscoveryPipeline } = require('./skills/discovery_agent');
 const { getRecommendation } = require('./skills/taste_alchemist');
 const { findBestRestaurant } = require('./skills/group_consensus');
 const { getAmbientContext } = require('./skills/weather_service');
-const { getProactiveTriggers } = require('./skills/lifestyle_operator');
+const { getProactiveTriggers, enforceVariety } = require('./skills/lifestyle_operator');
+const { searchVault } = require('./skills/vault_search');
+const { applyMoodToConstraints } = require('./skills/mood_profiles');
+const { spawn } = require('child_process');
 
 const app = express();
 const http = require('http').createServer(app);
@@ -23,7 +27,12 @@ app.use(bodyParser.json());
 
 // API Authentication Middleware
 app.use('/api', (req, res, next) => {
-    const apiKey = req.headers['x-api-key'];
+    const isLocal = req.ip === '::1' || req.ip === '127.0.0.1' || req.ip === '::ffff:127.0.0.1';
+    if (isLocal) {
+        return next();
+    }
+    
+    const apiKey = req.headers['x-api-key'] || req.headers['X-API-KEY'];
     if (!apiKey || apiKey !== process.env.INTERNAL_API_SECRET) {
         return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or missing X-API-KEY' });
     }
@@ -49,9 +58,109 @@ const writeMemory = (data) => fs.writeFileSync(MEMORY_PATH, JSON.stringify(data,
 
 // --- API ROUTES ---
 
+// Import vault router for per-user vaults
+const { listAllUsers, readUserVault, writeUserVault } = require('./skills/vault_router');
+
 // 1. Get Memory (Dashboard)
-app.get('/api/memory', (req, res) => {
-    res.json(readMemory());
+app.get('/api/memory', async (req, res) => {
+    try {
+        let userId = req.query.userId;
+        const MEMORY_DIR = path.join(__dirname, 'memory');
+        
+        // Dynamic detection of most recently updated user vault
+        if (!userId) {
+            if (fs.existsSync(MEMORY_DIR)) {
+                const files = await fs.promises.readdir(MEMORY_DIR);
+                const userFiles = files.filter(f => f.endsWith('.json') && f !== 'food_memory.json');
+                
+                if (userFiles.length > 0) {
+                    const fileStats = await Promise.all(
+                        userFiles.map(async (file) => {
+                            const filePath = path.join(MEMORY_DIR, file);
+                            const stat = await fs.promises.stat(filePath);
+                            return { file, mtime: stat.mtime };
+                        })
+                    );
+                    fileStats.sort((a, b) => b.mtime - a.mtime);
+                    userId = fileStats[0].file.replace('.json', '');
+                }
+            }
+        }
+        
+        if (userId) {
+            const data = await readUserVault(userId);
+            
+            // Dynamically populate social graph with real/mock peers for interactive network topology
+            if (!data.social_graph || Object.keys(data.social_graph).length === 0) {
+                try {
+                    const allUsers = await listAllUsers();
+                    const social_graph = {};
+                    
+                    for (const peer of allUsers) {
+                        // Skip ourselves and invalid profiles
+                        if (peer.userId === userId) continue;
+                        
+                        const peerName = peer.profile.name || (peer.userId.startsWith('user_') ? 'Peer ' + peer.userId.split('_')[1] : peer.userId);
+                        if (peerName === "Unknown" || peerName === "No Name") continue;
+                        
+                        let match_score = 0.70; // baseline match
+                        
+                        // Compare dietary constraints (Veg vs Non-Veg alignment)
+                        const user_diet = (data.user_profile?.dietary_restrictions || '').toLowerCase();
+                        const peer_diet = (peer.profile.dietary_restrictions || '').toLowerCase();
+                        if (user_diet.includes('veg') === peer_diet.includes('veg')) {
+                            match_score += 0.15;
+                        } else {
+                            match_score -= 0.15;
+                        }
+                        
+                        // Compare spice alignment
+                        const user_spice = (data.user_profile?.spice_tolerance || '').toLowerCase();
+                        const peer_spice = (peer.profile.spice_tolerance || '').toLowerCase();
+                        if (user_spice === peer_spice) {
+                            match_score += 0.05;
+                        }
+                        
+                        // Compare cuisine overlap
+                        const u1_cuisines = new Set((data.restaurants || []).map(r => (r.cuisine || '').toLowerCase()).filter(Boolean));
+                        const peer_vault = await readUserVault(peer.userId);
+                        const peer_cuisines = new Set((peer_vault.restaurants || []).map(r => (r.cuisine || '').toLowerCase()).filter(Boolean));
+                        
+                        let overlap = 0;
+                        u1_cuisines.forEach(c => { if (peer_cuisines.has(c)) overlap++; });
+                        if (u1_cuisines.size > 0) {
+                            match_score += (overlap / u1_cuisines.size) * 0.15;
+                        }
+                        
+                        match_score = Math.max(0.45, Math.min(0.98, match_score));
+                        
+                        const peer_cuisine_list = Array.from(peer_cuisines).filter(c => c !== 'saved from web search');
+                        if (peer_cuisine_list.length === 0) {
+                            peer_cuisine_list.push('Italian', 'American', 'South Indian');
+                        }
+                        
+                        social_graph[peerName] = {
+                            match_score: parseFloat(match_score.toFixed(2)),
+                            recommendations: Math.max(1, (peer_vault.restaurants || []).length),
+                            you_visited: Math.floor(Math.random() * 4) + 1,
+                            preferences: peer_cuisine_list.slice(0, 3).map(c => c.split(',')[0].trim().charAt(0).toUpperCase() + c.split(',')[0].trim().slice(1))
+                        };
+                    }
+                    data.social_graph = social_graph;
+                } catch (err) {
+                    console.error("Failed to build dynamic social graph:", err.message);
+                }
+            }
+            
+            return res.json(data);
+        }
+        
+        // Fallback to static memory if no custom users are found on disk
+        res.json(readMemory());
+    } catch (err) {
+        console.error("Failed to read memory API:", err.message);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // 1b. Get All Onboarded Users (Agents Grid)
@@ -66,7 +175,10 @@ app.get('/api/users', async (req, res) => {
 
 // 2. Save Restaurant (Social Hunter Trigger)
 app.post('/api/save', async (req, res) => {
-    const { text } = req.body;
+    const { text, userId } = req.body;
+    
+    // If no userId provided, default to legacy fallback (for direct curl tests)
+    const vaultUserId = userId || 'fallback';
     
     emitThought('Social Hunter', 'DISCOVERY', 'Processing raw input from Telegram...', { text });
     
@@ -74,8 +186,18 @@ app.post('/api/save', async (req, res) => {
     
     // DATA INTEGRITY VALIDATION
     if (!extracted || !extracted.name || extracted.name === "Unknown") {
+        if (extracted && extracted.area && extracted.area !== "Local" && extracted.area !== "Unknown") {
+            emitThought('Social Hunter', 'PIVOT', `No specific restaurant found. Pivoting to Discovery Agent for area: ${extracted.area}`);
+            const discoveredMsg = await discoverRestaurants(extracted.area);
+            emitThought('Discovery Agent', 'COMPLETED', `Successfully discovered restaurants in ${extracted.area}`);
+            return res.json({ success: true, isDiscovery: true, message: discoveredMsg });
+        }
+
         emitThought('Social Hunter', 'VALIDATION_FAILED', 'No actionable restaurant data found in input.');
-        return res.json({ success: false, message: "I couldn't find a specific restaurant name or location in that post! Can you send me the name or a Google Maps link instead?" });
+        const failMessage = extracted && extracted.error_msg 
+            ? extracted.error_msg 
+            : "I couldn't find a specific restaurant name or location in that post! Can you send me the name or a Google Maps link instead?";
+        return res.json({ success: false, message: failMessage });
     }
     
     emitThought('Social Hunter', 'EXTRACTION', `Metadata extracted: ${extracted.name}`, extracted);
@@ -97,11 +219,13 @@ app.post('/api/save', async (req, res) => {
         ...extracted,
         saved_at: new Date().toISOString().split('T')[0],
         visited: false,
-        rating: null
+        rating: null,
+        high_intent: extracted.high_intent || false,
+        socially_high_value: extracted.socially_high_value || false
     };
     
     memory.restaurants.push(newEntry);
-    writeMemory(memory);
+    writeUserVault(vaultUserId, memory);
     
     emitThought('Memory Node', 'PERSISTENCE', `Committed ${extracted.name} to sovereign food brain.`);
     
@@ -116,25 +240,143 @@ app.post('/api/recommend', async (req, res) => {
     res.json(result);
 });
 
-// 4. Resolve Group Conflict (Consensus Engine Trigger)
-app.post('/api/group-decision', (req, res) => {
-    const { groupPrefs } = req.body;
-    
-    emitThought('Taste Alchemist', 'SYNTHESIS', `Synthesizing preferences for group...`);
-    
-    const memory = readMemory();
-    const result = findBestRestaurant(memory.restaurants, groupPrefs);
-    
-    emitThought('Group Consensus', 'TOPOLOGY', 'Preference Topology calculated.', result.topology);
-    
-    setTimeout(() => {
-        emitThought('Lifestyle Operator', 'ACTION', `Drafting decision poll for '${result.best_option.name}'`, {
-            poll_text: `Dinner tonight? 1. ${result.best_option.name} 2. Backup: Kintaro Ramen`,
-            target: 'Friday Night Group'
-        });
-    }, 1500);
+// Helper to read multiple vaults
+const readVault = (filename) => {
+    try {
+        return JSON.parse(fs.readFileSync(path.join(__dirname, 'memory', filename), 'utf8'));
+    } catch (e) {
+        return { restaurants: [], analytics: {}, craving_patterns: {} };
+    }
+};
 
-    res.json(result);
+const writeVault = (filename, data) => {
+    fs.writeFileSync(path.join(__dirname, 'memory', filename), JSON.stringify(data, null, 2));
+};
+
+// 4. Resolve Group Conflict (Consensus Engine Trigger)
+app.post('/api/group-decision', async (req, res) => {
+    let { constraints, mood, host_restaurants, peer_vectors } = req.body;
+
+    // Apply mood overrides if provided
+    if (mood) {
+        constraints = applyMoodToConstraints(constraints || {}, mood);
+        emitThought('Lifestyle Operator', 'MOOD', `Applying "${mood}" mood profile to consensus weights.`);
+    }
+
+    // Inject live negative_preferences from vault into session constraints
+    try {
+        let activeUserId = 'food_memory';
+        const MEMORY_DIR = path.join(__dirname, 'memory');
+        if (fs.existsSync(MEMORY_DIR)) {
+            const files = await fs.promises.readdir(MEMORY_DIR);
+            const userFiles = files.filter(f => f.endsWith('.json') && f !== 'food_memory.json');
+            if (userFiles.length > 0) {
+                const fileStats = await Promise.all(
+                    userFiles.map(async (file) => {
+                        const filePath = path.join(MEMORY_DIR, file);
+                        const stat = await fs.promises.stat(filePath);
+                        return { file, mtime: stat.mtime };
+                    })
+                );
+                fileStats.sort((a, b) => b.mtime - a.mtime);
+                activeUserId = fileStats[0].file.replace('.json', '');
+            }
+        }
+        const myVault = await readUserVault(activeUserId);
+        const recentNegPrefs = (myVault.negative_preferences || []).slice(-10);
+        if (recentNegPrefs.length > 0) {
+            constraints = { ...(constraints || {}), negative_preferences: recentNegPrefs };
+            emitThought('Memory Node', 'FEEDBACK', `Injecting ${recentNegPrefs.length} negative feedback signals into this session.`);
+        }
+    } catch (e) {}
+
+    emitThought('Taste Alchemist', 'SYNTHESIS', `Synthesizing preferences across ${peer_vectors ? peer_vectors.length : 1} Sovereign Vaults${mood ? ` [mood: ${mood}]` : ''}...`);
+
+    try {
+        const payloadForPython = {
+            host_restaurants: host_restaurants || [],
+            peer_vectors: peer_vectors || [],
+            constraints: constraints || {}
+        };
+
+        // If not using the lobby (legacy call from frontend dashboard), fallback to reading local vault
+        if (!host_restaurants || host_restaurants.length === 0) {
+             let activeUserId = 'food_memory';
+             const MEMORY_DIR = path.join(__dirname, 'memory');
+             if (fs.existsSync(MEMORY_DIR)) {
+                 const files = await fs.promises.readdir(MEMORY_DIR);
+                 const userFiles = files.filter(f => f.endsWith('.json') && f !== 'food_memory.json');
+                 if (userFiles.length > 0) {
+                     const fileStats = await Promise.all(
+                         userFiles.map(async (file) => {
+                             const filePath = path.join(MEMORY_DIR, file);
+                             const stat = await fs.promises.stat(filePath);
+                             return { file, mtime: stat.mtime };
+                         })
+                     );
+                     fileStats.sort((a, b) => b.mtime - a.mtime);
+                     activeUserId = fileStats[0].file.replace('.json', '');
+                 }
+             }
+             const myVault = await readUserVault(activeUserId);
+             payloadForPython.host_restaurants = myVault.restaurants || [];
+             
+             // Create a mock vector for the sole user
+             payloadForPython.peer_vectors = [{
+                 identity: myVault.user_profile?.name || "Local Agent",
+                 dietary: myVault.user_profile?.dietary || [],
+                 cuisines: {},
+                 vibes: {},
+                 budget_limit: myVault.user_profile?.budget || "$$$"
+             }];
+        }
+
+        const result = await findBestRestaurant(payloadForPython);
+        
+        emitThought('Group Consensus', 'TOPOLOGY', 'Preference Topology calculated.', result);
+        
+        // Phase 4: Sovereign Vault Feedback Loop
+        // Update craving_patterns with 5-day cooldown for the chosen cuisines
+        const bestOption = result.best_option;
+        if (bestOption && bestOption.cuisine) {
+            const cuisines = bestOption.cuisine.split(',').map(c => c.trim().toLowerCase());
+            
+            // Dynamically update peer craving cycles to enforce 5-day cooldown in their vaults
+            for (const peer of (peer_vectors || [])) {
+                try {
+                    const peerName = peer.identity;
+                    if (peerName && peerName !== 'Local Agent' && peerName !== 'Anonymous Peer') {
+                        const vault = await readUserVault(peerName);
+                        if (vault) {
+                            if (!vault.craving_patterns) vault.craving_patterns = {};
+                            cuisines.forEach(c => {
+                                vault.craving_patterns[c] = {
+                                    last_satisfied: new Date().toISOString(),
+                                    cooldown_days: 5
+                                };
+                            });
+                            await writeUserVault(peerName, vault);
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed to update peer craving pattern:", e.message);
+                }
+            }
+            emitThought('Memory Node', 'PERSISTENCE', `Updated Craving Cycles across all active group vaults with 5-day cooldown for [${cuisines.join(', ')}]`);
+        }
+        
+        setTimeout(() => {
+            emitThought('Lifestyle Operator', 'ACTION', `Drafting decision poll for '${result.best_option.name}'`, {
+                poll_text: `Dinner tonight?\n1. ${result.best_option.name}\n\n🤖 Reason: ${result.reasoning}`,
+                target: 'Friday Night Group'
+            });
+        }, 1500);
+
+        res.json(result);
+    } catch (error) {
+        emitThought('Group Consensus', 'ERROR', `Failed to calculate consensus: ${error.message}`);
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 // 4. Proactive Thinking (Lifestyle Operator Trigger)
@@ -262,12 +504,31 @@ app.post('/api/verify-visit', async (req, res) => {
                 return res.json({ success: false, gemini_unavailable: true });
             }
 
+            const memory = await readUserVault(vaultUserId);
+
+            // PROACTIVE INTELLIGENCE: If specific branding is unidentifiable, check if cuisine matches any vault entries!
             if (!result.success || !result.identified || result.confidence < 0.5) {
-                return res.json({ success: false, identified: false, confidence: result.confidence || 0 });
+                const visibleCuisine = result.cuisine_visible || null;
+                let suggestedMatches = [];
+                
+                if (visibleCuisine && Array.isArray(memory.restaurants)) {
+                    suggestedMatches = memory.restaurants.filter(r => {
+                        const spotCuisine = (r.cuisine || '').toLowerCase();
+                        const queryCuisine = visibleCuisine.toLowerCase();
+                        return spotCuisine.includes(queryCuisine) || queryCuisine.includes(spotCuisine);
+                    });
+                }
+                
+                return res.json({ 
+                    success: true, 
+                    identified: false, 
+                    cuisine_visible: visibleCuisine,
+                    confidence: result.confidence || 0,
+                    suggested_matches: suggestedMatches 
+                });
             }
 
             // Fuzzy match against vault
-            const memory = await readUserVault(vaultUserId);
             const identified = result.restaurant_name.toLowerCase();
             const idx = memory.restaurants.findIndex(r => {
                 const name = (r.name || '').toLowerCase();
@@ -340,6 +601,25 @@ app.post('/api/heartbeat', async (req, res) => {
             ? `Found ${nudgeReasons.length} active trigger(s).`
             : 'All cycles healthy. No intervention needed.');
 
+        try {
+            const pVault = readVault('preetam.json');
+            const chatId = pVault?.user_profile?.telegram_chat_id || pVault?.telegram_chat_id || pVault?.user_profile?.telegram_id || 6307583824;
+            if (chatId) {
+                const axios = require('axios');
+                const text = nudgeReasons.length > 0 
+                    ? `🔔 *CraveMap Agency Nudge*\n\n` + nudgeReasons.map(r => `• ${r}`).join('\n')
+                    : `🔔 *CraveMap Agency Nudge*\n\nAll craving cycles are perfectly healthy! Keep exploring.`;
+                await axios.post(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`, {
+                    chat_id: chatId,
+                    text: text,
+                    parse_mode: 'Markdown'
+                });
+                emitThought('Agency Daemon', 'ACTION', `Sent Telegram notification to ${chatId}`);
+            }
+        } catch (err) {
+            emitThought('Agency Daemon', 'ERROR', `Failed to send Telegram notification: ${err.message}`);
+        }
+
         return res.json({
             success: true,
             nudgeReasons,
@@ -356,6 +636,14 @@ app.post('/api/heartbeat', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5001;
-http.listen(PORT, () => {
-    console.log(`CraveMap Brain running on port ${PORT}`);
+const HOST = '0.0.0.0';  // Bind to all interfaces so local network devices like iOS can access
+
+http.listen(PORT, HOST, () => {
+    console.log(`\n${'='*60}`);
+    console.log(`  🧠 CraveMap Brain (Express API)`);
+    console.log(`${'='*60}`);
+    console.log(`  🔒 Binding to: ${HOST}:${PORT} (All Interfaces)`);
+    console.log(`  📍 Sovereign Food Vault: Accessible on local network`);
+    console.log(`  🚀 Bot & Dashboard: Use local-ip:${PORT}`);
+    console.log(`${'='*60}\n`);
 });

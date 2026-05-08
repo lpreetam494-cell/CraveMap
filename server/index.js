@@ -601,6 +601,25 @@ app.post('/api/heartbeat', async (req, res) => {
             ? `Found ${nudgeReasons.length} active trigger(s).`
             : 'All cycles healthy. No intervention needed.');
 
+        if (nudgeReasons.length > 0) {
+            try {
+                const pVault = readVault('preetam.json');
+                const chatId = pVault?.user_profile?.telegram_chat_id || pVault?.telegram_chat_id || pVault?.user_profile?.telegram_id || 6307583824;
+                if (chatId) {
+                    const axios = require('axios');
+                    const text = `🔔 *CraveMap Agency Nudge*\n\n` + nudgeReasons.map(r => `• ${r}`).join('\n');
+                    await axios.post(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`, {
+                        chat_id: chatId,
+                        text: text,
+                        parse_mode: 'Markdown'
+                    });
+                    emitThought('Agency Daemon', 'ACTION', `Sent Telegram notification to ${chatId}`);
+                }
+            } catch (err) {
+                emitThought('Agency Daemon', 'ERROR', `Failed to send Telegram notification: ${err.message}`);
+            }
+        }
+
         return res.json({
             success: true,
             nudgeReasons,

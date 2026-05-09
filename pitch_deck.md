@@ -15,6 +15,8 @@
 **Visual:** Image of the 'Sovereign Home' dashboard with the 94% Match.
 **Script:** "CraveMap is an autonomous agent system built on OpenClaw. It doesn't wait for you to search. it watches your digital inputs, learns your 'Craving Cycles,' and proactively suggests the right meal at the right time. It is your Sovereign Food Brain."
 
+
+## slides  
 ## Slide 4: OpenClaw Architecture (The Engine)
 **Visual:** Diagram showing Social Hunter -> Taste Alchemist -> Lifestyle Operator.
 **Script:** "Our system is powered by three specialized OpenClaw Agents:

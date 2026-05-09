@@ -60,23 +60,42 @@ cd canvas && npm run dev
 
 ---
 
-## 🧪 Demo Workflows
-
-### A. The "Social Hunter" Extraction
-1.  Open your Telegram Bot.
-2.  Send: *"Check out Oasi Vegan Japanese, it's in the Mission and has great spicy ramen."*
-3.  **Watch the Dashboard**: The "OpenClaw Operations" feed will light up as the agent extracts metadata and saves it to your brain.
-
-### B. Proactive Intelligence
-1.  The agent monitors the weather.
-2.  If the Weather API detects rain, the **Lifestyle Operator** will push a "Rainy Day Ramen" insight to your dashboard autonomously.
-
-### C. Group Consensus
-1.  Navigate to the **Groups** tab.
-2.  Click **"Lock It In"**.
-3.  The agent resolves conflicts between members and drafts a real-world decision poll.
+#Here is a refined, direct version of your workflows and privacy protocols, structured for maximum clarity and technical precision.
 
 ---
 
-## 🛡️ Sovereignty & Privacy
-CraveMap implements the **Sovereign Data Vault**. Your food memory is stored in `food_memory.json` on your hardware. You can purge this cache at any time, ensuring no centralized entity owns your behavioral data.
+## ⚙️ Core Operational Workflows
+
+### 1. The "Signal Capture" Pipeline
+
+* **Interaction:** Direct message your Telegram interface with a raw recommendation (e.g., *"Try Oasi Vegan Japanese; their spicy ramen in the Mission is elite."*)
+* **Processing:** The **OpenClaw Engine** parses the unstructured text, scrapes relevant metadata (location coordinates, dish tags, flavor profiles), and commits the structured data to your local knowledge base.
+* **Verification:** You can monitor live extraction logs via the "Operations Feed" on your primary dashboard.
+
+### 2. Contextual Logic & Automation
+
+* **Environmental Triggers:** The system continuously polls external APIs (e.g., OpenWeather).
+* **Autonomous Execution:** If environmental conditions shift—such as a sudden rainstorm—the **Lifestyle Operator** cross-references weather data with your stored preferences.
+* **Outcome:** The system proactively pushes a high-relevance suggestion, like "Rainy Day Ramen," directly to your interface without manual prompting.
+
+### 3. Multi-User Conflict Resolution
+
+* **Navigation:** Access the **Groups** module to manage collective decisions.
+* **The "Lock It In" Protocol:** When a group is undecided, the agent analyzes individual constraints and preferences to resolve friction points.
+* **Deployment:** The system generates a optimized decision poll designed to reach a consensus rapidly.
+
+---
+
+## 🔐 Data Architecture & User Autonomy
+
+CraveMap operates on a **Local-First Sovereignty Model**.
+
+### The Sovereign Data Vault
+
+* **Physical Storage:** Your culinary history is stored exclusively in a `food_memory.json` file residing on your local hardware.
+* **Zero Centralization:** No behavioral data is transmitted to or stored on a centralized cloud server.
+* **Full Command:** You maintain absolute "right-to-erase" capabilities. Purging the local cache immediately and permanently deletes your entire footprint, ensuring you remain the sole owner of your digital memory.
+
+---
+
+**Note for the Developer:** Ensure that the `food_memory.json` file is regularly backed up, as local-only storage means data recovery is impossible once the cache is purged or the hardware is compromised. Use clear, direct labels in the UI to reflect this "Sovereign" responsibility.

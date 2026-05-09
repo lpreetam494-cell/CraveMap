@@ -1,51 +1,48 @@
-# CraveMap: Phased Production Roadmap
-**From Hackathon MVP to Full-Fledged Sovereign App**
+# CraveMap: Strategic Production Roadmap
+**From Hackathon Prototype to Sovereign Intelligence Ecosystem**
 
 ---
 
-## Phase 1: MVP Core (Achieved ✅)
-The foundational architecture required to ingest, analyze, and retrieve personalized food data.
-*   **Live Communication Layer:** Fully implemented `Telegraf` (Telegram Bot API) listener handling text, interactive inline-keyboards for onboarding, and forwarding media links.
-*   **Ambient Awareness:** Integrated `OpenWeatherMap` API to trigger Lifestyle Operator logic (e.g., suggesting ramen on rainy days).
-*   **Intelligent Enrichment:** Built a "Self-Healing" data pipeline using Tavily Web Search and Groq (LLaMA 3) to automatically fill in missing restaurant data (cuisine, budget, vibe).
-*   **Sovereignty Core:** Transitioned from a monolithic data structure to strict Per-User Sovereign Vaults (`user_{telegramId}.json`), ensuring absolute data isolation.
+## Phase 1: Architectural Foundation (Status: Production Ready ✅)
+The core infrastructure focuses on high-fidelity data ingestion and the establishment of "User Sovereignty."
+* **Omnichannel Communication:** Deployment of a high-performance `Telegraf` (Telegram Bot API) listener. Features include state-aware text processing and interactive inline-keyboards for intuitive user onboarding.
+* **Environmental Context Awareness:** Integration of the `OpenWeatherMap` API. This enables the **Lifestyle Operator** to correlate meteorological data with culinary suggestions (e.g., automated comfort food triggers during high-precipitation events).
+* **Autonomous Data Enrichment:** A "Self-Healing" pipeline powered by **Tavily Web Search** and **Groq (Llama 3)**. The system automatically reconciles sparse inputs, populating missing metadata such as pricing tiers, cuisine classification, and atmospheric vibes.
+* **Sovereignty Implementation:** Transitioned to a decentralized data model using **Per-User Sovereign Vaults** (`user_{id}.json`). This architecture ensures 100% data isolation and local-first privacy.
 
-## Phase 2: Security & Performance Hardening (Achieved ✅)
-Essential infrastructure patches to ensure the local MVP can survive rigorous testing and demo environments without crashing.
-*   **Defeated RCE:** Replaced vulnerable shell executions (`exec`) with secure `execFile` calls to neutralize command injection attacks from malicious Instagram URLs.
-*   **Zero-Trust API Auth:** Implemented an internal secret `X-API-KEY` handshake between the Express API and the Telegram Bot to prevent ID spoofing.
-*   **Rate Limiting:** Added in-memory spam protection to prevent users from crashing Google Gemini quotas.
-*   **Event Loop Optimization:** Migrated all database reads to modern async Promises (`fs.promises`), preventing the Node.js server from freezing during heavy loads.
+## Phase 2: System Hardening & Optimization (Status: Validated ✅)
+Security and performance patches designed to ensure stability under high-concurrency demo environments.
+* **Execution Security:** Eliminated potential **Remote Code Execution (RCE)** vectors by migrating from `exec` to `execFile` for Instagram metadata extraction, neutralizing command injection risks.
+* **Internal Authentication:** Established a Zero-Trust `X-API-KEY` handshake protocol between the Express backend and the Telegram bot to prevent identity spoofing and unauthorized data access.
+* **Resource Governance:** Implemented in-memory rate limiting to protect LLM quotas and prevent denial-of-service (DoS) scenarios during stress testing.
+* **Non-Blocking I/O:** Refactored the data persistence layer to use `fs.promises`. This eliminates Event Loop blocking, ensuring the Node.js server remains responsive during intensive I/O operations.
 
-## Phase 3: Frontend Polish & A2 UI Integration (Upcoming 🚧)
-The hackathon places a massive emphasis on visual aesthetics and user experience.
-*   **A2 UI Implementation:** Overhaul the entire React frontend to utilize the **A2 UI** design system. This will ensure the interface is stunning, responsive, and meets the strict UI rules of the hackathon.
-*   **Dynamic Dashboards:** Replace static CSS bars with interactive, animated data visualizations for the Intelligence Dashboard.
-*   **PWA Offline Mode:** Use a Service Worker so users can view their Sovereign Bucket List without an internet connection.
+## Phase 3: Cognitive UX & A2 Integration (Status: In Development 🚧)
+Elevating the interface to meet elite hackathon standards for visual fidelity and responsiveness.
+* **A2 UI Design Language:** A complete overhaul of the React frontend using the **A2 UI** framework. The focus is on a futuristic, high-contrast aesthetic that aligns with the "Sovereign Intelligence" branding.
+* **High-Fidelity Visualizations:** Transitioning from static elements to dynamic, animated data dashboards using **Framer Motion** to visualize user "Taste Profiles."
+* **PWA Resilience:** Implementation of Service Workers to enable **Offline Access**, allowing users to query their personal Sovereign Bucket List without active network connectivity.
 
-## Phase 4: Location Intelligence & Google Maps (Upcoming 🚧)
-Moving from text-based guessing to absolute geospatial coordinates for real-world viability.
-*   **API Integration:** Hook into the [Google Places API](https://developers.google.com/maps/documentation/places/web-service/overview).
-*   **Implementation:** 
-    *   When the bot extracts a name, it will ping Google to fetch the precise `place_id`, `lat/long` coordinates, and the direct Google Maps routing link.
-    *   This enables the Group Consensus engine to calculate actual travel times using the Google Distance Matrix API.
+## Phase 4: Geospatial Intelligence (Status: In Development 🚧)
+Integrating precise location data to transform recommendations into actionable logistics.
+* **Google Places Integration:** Direct hook into the **Google Places API** to map extracted names to unique `place_id` identifiers and precise latitude/longitude coordinates.
+* **Logistical Engine:** Utilization of the **Google Distance Matrix API** within the Group Consensus engine to calculate real-world travel times and optimal meeting points for social dining.
 
-## Phase 5: Cloud Database Migration (Final Phase 🚀)
-The ultimate step to move from a "Local-First" prototype to a massively scalable cloud application.
-*   **Tech Stack:** Migrate from local JSON files to [MongoDB Atlas](https://www.mongodb.com/atlas/database) or Supabase.
-*   **Implementation:** 
-    *   Because our data is already structured perfectly as JSON documents (profiles, restaurants array, etc.), migrating to MongoDB collections will require minimal refactoring of `vault_router.js`.
-    *   This migration is strictly required before deploying the Express backend to a cloud platform like Render or AWS, as local files do not persist across cloud server restarts.
-*   **End-to-End Encryption:** Implement `AES-256` encryption at the database level to maintain the "Sovereign" privacy promise, even in the cloud.
+## Phase 5: Distributed Scale & Cryptography (Status: Final Frontier 🚀)
+The transition from a local-first prototype to a globally scalable cloud infrastructure.
+* **Cloud Persistence:** Migration to **MongoDB Atlas**. The current JSON-centric architecture allows for a seamless transition to a NoSQL document store with minimal refactoring of the `vault_router.js` logic.
+* **Encryption at Rest:** Implementation of **AES-256** encryption for all user vaults. This maintains the "Sovereign" promise even when data is hosted on third-party cloud providers (AWS/Render).
+* **Stateless Scaling:** Implementation of **Redis** for managing Agent state, allowing the backend to scale horizontally across multiple cloud instances.
 
 ---
 
-## Full Tech Stack Target
-| Layer | Technology |
-|---|---|
-| **Frontend** | React (Vite) + **A2 UI** + Framer Motion |
-| **Backend** | Node.js + Express + Socket.io |
-| **Agents** | Groq (Llama 3) + Python Ingestion Engine |
-| **Database** | MongoDB Atlas (User Data) + Redis (Agent State) |
-| **APIs** | Telegram, Google Maps, OpenWeather, Tavily |
-| **Deployment** | Vercel (Frontend), Render/AWS (Backend) |
+### Comprehensive Technical Stack
+
+| Layer | Technology | Function |
+| :--- | :--- | :--- |
+| **Frontend** | React (Vite) + **A2 UI** | High-Fidelity User Interface |
+| **Backend** | Node.js (Express) + Socket.io | Real-time Event Orchestration |
+| **Intelligence** | Groq (Llama 3) + Python | Multi-Agent Logic & Ingestion |
+| **Data Vault** | MongoDB Atlas + AES-256 | Encrypted Sovereign Storage |
+| **Geospatial** | Google Maps/Places API | Location & Routing Intelligence |
+| **Infrastructure** | Vercel & AWS/Render | CI/CD & Production Hosting |

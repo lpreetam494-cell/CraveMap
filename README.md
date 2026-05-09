@@ -1,27 +1,36 @@
-# CraveMap: Sovereign Food Intelligence
+## CraveMap: Sovereign Food Intelligence
+
 **Autonomous Multi-Agent Food Decision Engine**
 
-Built for the **OpenClaw Hackathon (SRI-B)**.
-
-## 🏆 Hackathon Deliverables
-* 🎥 **[Demo Video]**(https://drive.google.com/file/d/1Ss2ewbnKvxpF1mWKK9G7tppZnbZOnD0H/view?usp=share_link)
-* 📊 **[Pitch Deck (PPT)]**(https://docs.google.com/presentation/d/1SXqAJz16rSSHDPrJnFuVk6eR4O2a1V7s/edit?usp=share_link&ouid=112066600456945679222&rtpof=true&sd=true)
-* 📝 **[AI Disclosure Form]**(https://docs.google.com/document/d/1m3gOn9kXvnv6nVWyuzBgIr6jbdx4Bc3J/edit?usp=share_link&ouid=112066600456945679222&rtpof=true&sd=true)
+Engineered for the **OpenClaw Hackathon (SRI-B)**.
 
 ---
 
-## 🌟 The Vision
-CraveMap is a "Sovereign" food intelligence system. Unlike centralized platforms (Yelp, UberEats), CraveMap puts the intelligence in the user's hands. It watches your social inputs, learns your behavioral patterns, and proactively assists you—all while keeping your food memory private and local.
+### 🚀 Deliverables & Documentation
 
-## 🧠 Multi-Agent Architecture
-Powered by **OpenClaw Orchestration**:
-1.  **Social Hunter**: Extracts structured metadata from raw Telegram/WhatsApp chats. *Upgraded with RapidAPI for direct Instagram scraping, protected by Simulation Fallbacks.*
-2.  **Taste Alchemist**: Synthesizes craving cycles and historical preferences to suggest the perfect meal. *Upgraded with Tavily Search API to handle Cold-Start queries.*
-3.  **Lifestyle Operator**: Monitors environmental context (Weather/Time) and executes proactive actions (Group Polls/Alerts).
+* 🎥 **[Performance Demo]**([https://drive.google.com/file/d/1Ss2ewbnKvxpF1mWKK9G7tppZnbZOnD0H/view?usp=share_link]()) — See the agents in action.
+* 📊 **[Strategic Pitch Deck]**([https://docs.google.com/presentation/d/1SXqAJz16rSSHDPrJnFuVk6eR4O2a1V7s/edit?usp=share_link&ouid=112066600456945679222&rtpof=true&sd=true]()) — Market vision and technical roadmap.
+* 📝 **[AI Transparency Disclosure]**([https://docs.google.com/document/d/1m3gOn9kXvnv6nVWyuzBgIr6jbdx4Bc3J/edit?usp=share_link&ouid=112066600456945679222&rtpof=true&sd=true]()) — Full model and data attribution.
 
-## 🛡️ The Hackathon "Safety Net"
-To guarantee a flawless demo, the system is designed defensively. If the RapidAPI or Tavily keys are missing, or if stage Wi-Fi drops, the agents seamlessly transition into "Simulation Mode," utilizing rich, hardcoded fallback data without breaking the Telegram UX.
+---
 
+### 🌐 The Vision
+
+CraveMap reclaims the "food decision" from centralized giants like Yelp or UberEats. By shifting intelligence to the edge, CraveMap operates as a private, local-first brain that decodes your social interactions and behavioral rhythms to provide proactive recommendations while maintaining absolute data sovereignty.
+
+### ⚙️ Multi-Agent Orchestration
+
+The system utilizes **OpenClaw** to manage three specialized agents:
+
+1. **Social Hunter**: Parses unstructured data from Telegram and WhatsApp into structured metadata. It features an **Instagram Scraping Pipeline** via RapidAPI, supported by simulation logic to ensure high reliability.
+2. **Taste Alchemist**: A predictive engine that maps craving cycles and historical data. It integrates the **Tavily Search API** to resolve "Cold-Start" scenarios, ensuring the engine has answers even when personal data is sparse.
+3. **Lifestyle Operator**: The execution layer. It monitors external variables like current weather and time to trigger proactive workflows, such as automated group polls or context-aware dining alerts.
+
+---
+
+### 🛡️ Resilience & Demo Integrity
+
+To eliminate the risk of live-demo failure, CraveMap employs a **Defensive Architectural Fail-Safe**. If the system detects API latency, missing credentials, or network instability, the agents automatically switch to **Simulation Mode**. This ensures the Telegram UX remains fluid and responsive by serving high-fidelity fallback data without a single break in logic.
 ---
 
 ## 🚀 Setup Instructions

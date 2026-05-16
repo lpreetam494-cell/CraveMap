@@ -944,7 +944,24 @@ bot.on('text', async (ctx) => {
     if (text.includes("maps.app.goo.gl") || text.includes("goo.gl/maps")) {
         ctx.reply("📍 *Google Maps link detected!* Extracting details...", { parse_mode: 'Markdown' });
         try {
-            const response = await axios.post(API_BASE + '/api/save', { text, userId: ctx.from.id });
+            // 1. Expand the shortlink to get the real restaurant name
+            let expandedUrl = text;
+            try {
+                await axios.get(text, { maxRedirects: 0 });
+            } catch (e) {
+                if (e.response && e.response.headers && e.response.headers.location) {
+                    expandedUrl = e.response.headers.location;
+                }
+            }
+            
+            let extractedQuery = text; // fallback
+            const match = expandedUrl.match(/place\/([^\/]+)/) || expandedUrl.match(/daddr=([^&]+)/);
+            if (match && match[1]) {
+                extractedQuery = decodeURIComponent(match[1].replace(/\+/g, ' '));
+            }
+
+            // 2. Pass the REAL name to the AI
+            const response = await axios.post(API_BASE + '/api/save', { text: extractedQuery, userId: ctx.from.id });
             if (response.data.success) {
                 const entry = response.data.entry || { name: "New Spot", area: "Unknown" };
                 await ctx.reply(`✅ *Saved to Vault!* \n\nName: ${entry.name || 'New Spot'}\nArea: ${entry.area || 'Unknown'}\n\nYour data is secure on your laptop. 🧠`, { parse_mode: 'Markdown' });

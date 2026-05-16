@@ -162,7 +162,7 @@ const handleFinalize = async (ctx) => {
     );
 
     try {
-        const response = await axios.post('http://localhost:5001/api/group-decision', {
+        const response = await axios.post((process.env.API_BASE || 'http://localhost:5000') + '/api/group-decision', {
             host_restaurants: session.hostRestaurants,
             peer_vectors: session.peerVectors
         });

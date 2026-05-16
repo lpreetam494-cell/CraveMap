@@ -1,0 +1,17 @@
+{
+  "user_profile": {
+    "telegram_id": 1418684853,
+    "telegram_username": "Unknown",
+    "onboarded_at": "2026-05-16T15:19:34.317Z",
+    "awaiting_name_input": true
+  },
+  "restaurants": "b94c337b966e2f4fdac79f57bdbd7119:db0ab80a8cd7c0608e2d63ca94a5a9e6",
+  "craving_patterns": {},
+  "social_graph": {},
+  "visit_history": [],
+  "analytics": {
+    "telegram_chat_id": 1418684853
+  },
+  "negative_preferences": [],
+  "stealth_mode": false
+}

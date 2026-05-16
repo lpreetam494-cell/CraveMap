@@ -1,3 +1,4 @@
+console.log("🔥🔥🔥 BOT.JS v2.1 LOADED FROM DISK 🔥🔥🔥");
 const { Telegraf, Markup } = require('telegraf');
 const axios = require('axios');
 const path = require('path');
@@ -11,9 +12,12 @@ const lobby_manager = require('./skills/lobby_manager');
 const { readUserVault, writeUserVault } = require('./skills/vault_router');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
+const API_PORT = process.env.PORT || 5000;
+const API_BASE = 'http://localhost:' + API_PORT;
+
 // Secure backend communication
 axios.interceptors.request.use(config => {
-    if (config.url && config.url.includes('localhost:5001')) {
+    if (config.url && config.url.includes('localhost:' + API_PORT)) {
         config.headers['X-API-KEY'] = process.env.INTERNAL_API_SECRET;
     }
     return config;
@@ -86,14 +90,15 @@ bot.start(async (ctx) => {
         }
     } catch (e) {}
 
+        console.log("✅ NEW CODE v2.1 — /start handler reached for user:", name);
         ctx.reply(
-            `Welcome back, *${name}* to *CraveMap Sovereign* 🧠\n\n` +
+            `Welcome back, *${name}* to *CraveMap Sovereign* 🧬 _v2.1_\n\n` +
             `*Commands:*\n` +
             `/whoami — View your Food Persona\n` +
-            `/my_vault — 📍 View your saved restaurants\n` +
+            `/my\\_vault — 📍 View your saved restaurants\n` +
             `/discover Koramangala — Scout new restaurants\n` +
             `/consensus — Group decision lobby\n` +
-            `/switch [name] — 🔄 Swap vault profiles\n` +
+            `/switch \\[name\\] — 🔄 Swap vault profiles\n` +
             `/export\\_vault — Download your data\n` +
             `/wipe\\_memory — Nuclear wipe\n\n` +
             `Send a photo of your meal and I will verify the visit automatically.`,
@@ -546,7 +551,7 @@ bot.action('recalculate_consensus', async (ctx) => {
     ctx.answerCbQuery();
     await ctx.reply('🎲 Recalculating with updated preferences...');
     try {
-        const response = await axios.post('http://localhost:5001/api/group-decision', { constraints: {} });
+        const response = await axios.post(API_BASE + '/api/group-decision', { constraints: {} });
         const result = response.data;
         if (!result.best_option) return ctx.reply('❌ Still no match found. Try adding more spots to your vault!');
         const spot = result.best_option;
@@ -828,7 +833,7 @@ bot.command('discover', async (ctx) => {
 
     await ctx.reply(`🔭 Scouting *${area}*... Applying your Sovereign Filter...`, { parse_mode: 'Markdown' });
     try {
-        const response = await axios.post('http://localhost:5001/api/discover', { area, userId: ctx.from.id });
+        const response = await axios.post(API_BASE + '/api/discover', { area, userId: ctx.from.id });
         await sendDiscoveryCards(ctx, response.data);
     } catch (err) {
         ctx.reply('❌ Discovery failed: ' + err.message);
@@ -840,7 +845,7 @@ bot.action('discover_bangalore', async (ctx) => {
     saveChatId(ctx);
     await ctx.reply('🔭 Scouting *Bangalore*...', { parse_mode: 'Markdown' });
     try {
-        const response = await axios.post('http://localhost:5001/api/discover', { area: 'Bangalore', userId: ctx.from.id });
+        const response = await axios.post(API_BASE + '/api/discover', { area: 'Bangalore', userId: ctx.from.id });
         await sendDiscoveryCards(ctx, response.data);
     } catch (err) {
         ctx.reply('❌ Discovery failed: ' + err.message);
@@ -853,7 +858,7 @@ bot.on('location', async (ctx) => {
     const { latitude, longitude } = ctx.message.location;
     await ctx.reply(`📡 Got your coordinates! Scouting nearby restaurants...`);
     try {
-        const response = await axios.post('http://localhost:5001/api/discover', { area: 'Current Location', lat: latitude, lon: longitude, userId: ctx.from.id });
+        const response = await axios.post(API_BASE + '/api/discover', { area: 'Current Location', lat: latitude, lon: longitude, userId: ctx.from.id });
         await sendDiscoveryCards(ctx, response.data);
     } catch (err) {
         ctx.reply('❌ Discovery failed: ' + err.message);
@@ -871,7 +876,7 @@ bot.action(/sdsc_(.+)/, async (ctx) => {
     }
 
     try {
-        await axios.post('http://localhost:5001/api/save-discovery', { discovery: spot, userId: ctx.from.id });
+        await axios.post(API_BASE + '/api/save-discovery', { discovery: spot, userId: ctx.from.id });
         ctx.replyWithMarkdown(
             `💾 *${spot.name}* saved to your Sovereign Vault!\n` +
             `Tagged as \`discovery: true\` — your Taste Profile will adapt to this.`
@@ -906,73 +911,65 @@ bot.on('text', async (ctx) => {
                 return ctx.reply("⚠️ Please enter a valid name (between 2 and 30 characters, no slashes):");
             }
             
+            // Logic to link existing vault if name matches
             const sanitized = typedName.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
-            const MEMORY_DIR = path.join(__dirname, 'memory');
-            const targetPath = path.join(MEMORY_DIR, `${sanitized}.json`);
+            const targetPath = path.join(__dirname, 'memory', `${sanitized}.json`);
             
-            // SECURITY/INTELLIGENCE: If user-vault already exists on disk, link and load it instantly!
             if (fs.existsSync(targetPath)) {
-                try {
-                    const existingDataStr = fs.readFileSync(targetPath, 'utf8');
-                    const existingData = JSON.parse(existingDataStr);
-                    
-                    if (existingData.user_profile) {
-                        // Associate current Telegram ID to this existing vault!
-                        existingData.user_profile.telegram_id = userId;
-                        existingData.user_profile.telegram_username = ctx.from?.username || 'Unknown';
-                        delete existingData.user_profile.awaiting_name_input;
-                        
-                        // Save the updated vault back to disk
-                        const { writeUserVault } = require('./skills/vault_router');
-                        await writeUserVault(sanitized, existingData);
-                        
-                        // Clean up temporary user_<id>.json if it exists
-                        const tempPath = path.join(MEMORY_DIR, `user_${userId}.json`);
-                        if (fs.existsSync(tempPath)) {
-                            fs.unlinkSync(tempPath);
-                        }
-                        
-                        let spotCount = 0;
-                        if (Array.isArray(existingData.restaurants)) {
-                            spotCount = existingData.restaurants.length;
-                        } else if (typeof existingData.restaurants === 'string') {
-                            try {
-                                const cryptoUtil = require('./utils/crypto');
-                                const dec = JSON.parse(cryptoUtil.decrypt(existingData.restaurants));
-                                spotCount = Array.isArray(dec) ? dec.length : 0;
-                            } catch (e) {}
-                        }
-                        
-                        return ctx.reply(
-                            `🔑 *Sovereign Vault Linked Successfully!* 🔐\n\n` +
-                            `Welcome back, *${existingData.user_profile.name}*! I found your existing vault file on disk with *${spotCount} saved spot(s)*.\n\n` +
-                            `Your profile and data are fully loaded and active. Run /whoami or search your vault anytime!`,
-                            { parse_mode: 'Markdown' }
-                        );
-                    }
-                } catch (err) {
-                    console.error("Existing vault merge error:", err.message);
-                }
+                const existingData = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+                existingData.user_profile.telegram_id = userId;
+                delete existingData.user_profile.awaiting_name_input;
+                existingData.user_profile.onboarding_complete = true;
+                
+                await writeUserVault(sanitized, existingData);
+                return ctx.reply(`🔐 *Sovereign Vault Linked!* \n\nWelcome back, *${typedName}*! Your data and profile have been restored from your personal JSON file.`, { parse_mode: 'Markdown' });
             }
             
-            // Save name to profile and remove wait flag
             vault.user_profile.name = typedName;
             delete vault.user_profile.awaiting_name_input;
             await writeUserVault(userId, vault);
-            
-            // Rename file to <username>.json
-            const { renameVaultFile } = require('./skills/vault_router');
             await renameVaultFile(userId, typedName);
             
-            // Proceed to Diet Question
             const onboarding = require('./skills/onboarding');
             return onboarding.askDietType(ctx, typedName);
         }
     } catch (e) {
-        console.error("Onboarding Name Capture Error:", e.message);
+        console.error("Onboarding Error:", e.message);
     }
-    
-    // Distinguish between a URL save request and a Natural Language search
+
+    // Now proceed to Search/URL logic ONLY if not in onboarding
+    if (text.startsWith('/')) return; // Ignore other commands
+
+    // SOVEREIGN PRIORITY: Handle Google Maps links instantly
+    if (text.includes("maps.app.goo.gl") || text.includes("goo.gl/maps")) {
+        ctx.reply("📍 *Google Maps link detected!* Saving to your Sovereign Vault...", { parse_mode: 'Markdown' });
+        try {
+            const response = await axios.post(API_BASE + '/api/save', { text, userId: ctx.from.id });
+            if (response.data.success) {
+                const entry = response.data.entry || { name: "New Spot", area: "Unknown" };
+                await ctx.reply(`✅ *Saved to Vault!* \n\nName: ${entry.name || 'New Spot'}\nArea: ${entry.area || 'Unknown'}\n\nYour data is secure on your laptop. 🧠`, { parse_mode: 'Markdown' });
+                return; // 🛑 STOP HERE
+            }
+        } catch (e) {
+            // SUPER-BYPASS: If API fails, try to save the name manually from the link
+            try {
+                const manualName = text.split('/').pop().split('?')[0].replace(/-/g, ' ');
+                const { readUserVault, writeUserVault } = require('./skills/vault_router');
+                const vault = await readUserVault(userId);
+                vault.restaurants.push({
+                    name: manualName || "New Spot",
+                    area: "Saved via Link",
+                    cuisine: "Unknown",
+                    added_at: new Date().toISOString()
+                });
+                await writeUserVault(userId, vault);
+                return ctx.reply(`✅ *Sovereign Bypass:* I couldn't fetch live data, but I've saved the spot to your vault manually! 🧠`, { parse_mode: 'Markdown' });
+            } catch (inner) {
+                return ctx.reply("⚠️ Even the bypass failed. Please type the restaurant name directly!");
+            }
+        }
+    }
+
     if (text.includes("http") || text.includes("instagram") || text.includes("tiktok")) {
         
         // Rate Limiter Logic (Max 1 link per 30 seconds per user)
@@ -985,7 +982,7 @@ bot.on('text', async (ctx) => {
 
         ctx.reply("⚡ Agent Social Hunter is processing your media link...");
         try {
-            const response = await axios.post('http://localhost:5001/api/save', { text, userId: ctx.from.id }, { timeout: 60000 });
+            const response = await axios.post(API_BASE + '/api/save', { text, userId: ctx.from.id }, { timeout: 60000 });
             if (response.data.success) {
                 if (response.data.isDiscovery) {
                     ctx.reply(response.data.message);
@@ -1018,7 +1015,7 @@ bot.on('text', async (ctx) => {
         // Natural Language Search
         ctx.reply(`🔍 Querying Sovereign Vault for: "${text}"...`);
         try {
-            const response = await axios.post('http://localhost:5001/api/search-vault', { query: text, userId: ctx.from.id });
+            const response = await axios.post(API_BASE + '/api/search-vault', { query: text, userId: ctx.from.id });
             const { filters, results } = response.data;
             
             if (results && results.length > 0) {
@@ -1100,7 +1097,7 @@ bot.on('photo', async (ctx) => {
         fs.writeFileSync(tmpPath, Buffer.from(response.data));
 
         // Call verify-visit API
-        const verifyRes = await axios.post('http://localhost:5001/api/verify-visit', { imagePath: tmpPath, userId: ctx.from.id });
+        const verifyRes = await axios.post(API_BASE + '/api/verify-visit', { imagePath: tmpPath, userId: ctx.from.id });
         const result = verifyRes.data;
 
         if (result.gemini_unavailable) {

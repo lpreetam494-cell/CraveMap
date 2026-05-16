@@ -1,26 +1,10 @@
 {
-  "user_profile": {
-    "name": "AKASH",
-    "telegram_username": "ErenYeager160",
-    "telegram_id": 1669830040,
-    "onboarded_at": "2026-05-08T04:27:51.283Z",
-    "diet_type": "Non-Veg",
-    "favorite_cuisines": [
-      "Indian",
-      "Korean",
-      "Chinese"
-    ],
-    "spice_tolerance": "Mild",
-    "eating_style": "Explorer",
-    "onboarding_complete": true,
-    "persona_name": "The Global Spice Seeker"
-  },
-  "restaurants": [],
+  "user_profile": {},
+  "restaurants": "5ae955378ffd8575911c055b095374c7:3860ae4a6615974e3a02f7ae1970cec40aa7115cde1961ead51b8585cfebc2401591834710ed7a8ef8906c34eb93e8f83e510c06ad4faf143545a388038a30795d2d99d63a15e5b97560441975bd46dcb0b6e33bedb1014ffcae044c2922199a1e78bbca262809d4e68f00a845b6061248452e34bf712fb9545b529a8a06e43df8129132aed2b734c0ce683c818e1d0b79602de5eae8501a0c84746964615b37341263ad6460d27097a4fa4297b168ec94a139f426839955d33955b85c5dc9afe5c585415dacd58aea5499a6f52f1d24d6ce1815b52b63e8f33c78de760e9661d7776b8f87fda4ad0f26ac61b067b8cd58082e0c8a4c9f8eef2169b5eeb945aaca59d1eaa8eb49bb82cf19af3af351cb486ce501563a5d1ff3bfac19e5422c573173f3744d74ccd6693f99dfcdae5f24268002456da557aac298643f2d40fb5dc724de2efa8cd6293ca09d74b879e8def4930a85033c914502b2d251e3263055320e8a77bab5f25974623297e9a9ec04b76364f9060697bb07e77c5abd2ee539726c5268c69919f8095c99c651aab8cf98cd55bb95f393fe74e4f5c3a5d3f613a160eb681ff156dddc32e6af634a88be6944edad8f1c067198b65cb50f76a8482dc3530933e894da7a06dd244e7ce735a98ca2cd6b44759c253df1ef22ba2f6a95617d9faf3482562f544a2e9bc625cb5b96d1293fb5cbe4cd3719bb4068d37cbf69f176632b7de73e9b3dc1747f0f1cae31dd4e72fa9fa706a7366f07f0e5e9244e7cd8266c2384860aabf04e7ebded66afa89e467421a9b7b70b00b5d21f97c8b9e2c488325d78d9191a8a6b9bbcf3",
   "craving_patterns": {},
   "social_graph": {},
   "visit_history": [],
-  "analytics": {
-    "stealth_mode": true
-  },
-  "negative_preferences": []
+  "analytics": {},
+  "negative_preferences": [],
+  "stealth_mode": false
 }

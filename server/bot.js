@@ -101,6 +101,85 @@ bot.start(async (ctx) => {
         );
     });
 
+bot.command('my_vault', async (ctx) => {
+    try {
+        const userId = ctx.from.id;
+        const { getVaultPath, readUserVault } = require('./skills/vault_router');
+        
+        if (!fs.existsSync(getVaultPath(userId))) {
+            return ctx.reply("Your vault is currently empty. Start discovering to fill it up!");
+        }
+
+        const vault = await readUserVault(userId);
+        if (!vault.restaurants || vault.restaurants.length === 0) {
+            return ctx.reply("Your vault has no saved restaurants yet.");
+        }
+
+        let message = `🔐 *My Sovereign Vault*\n_You have ${vault.restaurants.length} spots saved._\n\n`;
+        
+        // Show up to 15 latest spots
+        const spots = vault.restaurants.slice().reverse().slice(0, 15);
+        spots.forEach((r, idx) => {
+            message += `*${idx + 1}. ${r.name}*\n`;
+            if (r.cuisine) message += `🥘 ${r.cuisine} `;
+            if (r.vibe) message += `✨ ${r.vibe}`;
+            message += `\n`;
+            if (r.maps_url) message += `📍 [View Map](${r.maps_url})\n`;
+            message += `\n`;
+        });
+
+        if (vault.restaurants.length > 15) {
+            message += `...and ${vault.restaurants.length - 15} more spots. Use /export_vault to see all.`;
+        }
+
+        ctx.reply(message, { parse_mode: 'Markdown', disable_web_page_preview: true });
+
+    } catch (e) {
+        console.error("Failed to list vault:", e.message);
+        ctx.reply("❌ Failed to read vault.");
+    }
+});
+
+bot.command('switch', async (ctx) => {
+    try {
+        const text = ctx.message.text.trim();
+        const targetName = text.replace('/switch', '').trim().toLowerCase();
+
+        if (!targetName) {
+            return ctx.reply("📂 *Switch Vault Profile*\n\nUsage: `/switch [name]`\nExample: `/switch preetam` or `/switch rohan`", { parse_mode: 'Markdown' });
+        }
+
+        const userId = ctx.from.id;
+        const { getVaultPath, readUserVault, writeUserVault } = require('./skills/vault_router');
+        const targetPath = getVaultPath(targetName);
+
+        if (!fs.existsSync(targetPath)) {
+            return ctx.reply(`❌ Vault profile for "*${targetName}*" not found on disk.`);
+        }
+
+        const targetVault = await readUserVault(targetName);
+        
+        // Link this Telegram ID to the target vault
+        if (!targetVault.user_profile) targetVault.user_profile = {};
+        targetVault.user_profile.telegram_id = userId;
+        targetVault.user_profile.telegram_username = ctx.from?.username || 'Unknown';
+        
+        await writeUserVault(targetName, targetVault);
+
+        ctx.reply(
+            `🔄 *Sovereign Identity Switched!* 🧠\n\n` +
+            `You are now linked to the vault: **${targetName}**\n` +
+            `All discoveries and commands will now commit to this vault.\n\n` +
+            `Type /whoami to see the new profile!`,
+            { parse_mode: 'Markdown' }
+        );
+
+    } catch (e) {
+        console.error("Switch failed:", e.message);
+        ctx.reply("❌ Switch failed: " + e.message);
+    }
+});
+
 // Dynamic Web Scout Enrichment via Groq LLM
 const enrichWebScoutRestaurant = async (name, address) => {
     try {

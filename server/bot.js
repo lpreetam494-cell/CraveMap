@@ -86,18 +86,20 @@ bot.start(async (ctx) => {
         }
     } catch (e) {}
 
-    ctx.reply(
-        `Welcome back, *${name}* to *CraveMap Sovereign* 🧠\n\n` +
-        `*Commands:*\n` +
-        `/whoami — View your Food Persona\n` +
-        `/discover Koramangala — Scout new restaurants\n` +
-        `/consensus — Group decision lobby\n` +
-        `/export\\_vault — Download your data\n` +
-        `/wipe\\_memory — Nuclear wipe\n\n` +
-        `Send a photo of your meal and I will verify the visit automatically.`,
-        { parse_mode: 'Markdown' }
-    );
-});
+        ctx.reply(
+            `Welcome back, *${name}* to *CraveMap Sovereign* 🧠\n\n` +
+            `*Commands:*\n` +
+            `/whoami — View your Food Persona\n` +
+            `/my_vault — 📍 View your saved restaurants\n` +
+            `/discover Koramangala — Scout new restaurants\n` +
+            `/consensus — Group decision lobby\n` +
+            `/switch [name] — 🔄 Swap vault profiles\n` +
+            `/export\\_vault — Download your data\n` +
+            `/wipe\\_memory — Nuclear wipe\n\n` +
+            `Send a photo of your meal and I will verify the visit automatically.`,
+            { parse_mode: 'Markdown' }
+        );
+    });
 
 // Dynamic Web Scout Enrichment via Groq LLM
 const enrichWebScoutRestaurant = async (name, address) => {

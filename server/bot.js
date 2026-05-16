@@ -942,7 +942,7 @@ bot.on('text', async (ctx) => {
 
     // SOVEREIGN PRIORITY: Handle Google Maps links instantly
     if (text.includes("maps.app.goo.gl") || text.includes("goo.gl/maps")) {
-        ctx.reply("📍 *Google Maps link detected!* Saving to your Sovereign Vault...", { parse_mode: 'Markdown' });
+        ctx.reply("📍 *Google Maps link detected!* Extracting details...", { parse_mode: 'Markdown' });
         try {
             const response = await axios.post(API_BASE + '/api/save', { text, userId: ctx.from.id });
             if (response.data.success) {

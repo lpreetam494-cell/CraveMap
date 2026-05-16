@@ -9,7 +9,7 @@ import FoodVault from './components/FoodVault';
 import SocialGraph from './components/SocialGraph';
 import AgentGrid from './components/AgentGrid';
 
-const API_BASE = `http://${window.location.hostname}:5001`;
+const API_BASE = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:5001`;
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
@@ -35,7 +35,8 @@ export default function App() {
     fetch(url, {
       headers: {
         'Content-Type': 'application/json',
-        'X-API-KEY': import.meta.env.VITE_API_KEY
+        'X-API-KEY': import.meta.env.VITE_API_KEY,
+        'Bypass-Tunnel-Reminder': 'true'
       }
     })
       .then(res => res.json())
@@ -47,7 +48,8 @@ export default function App() {
     fetch(`${API_BASE}/api/users`, {
       headers: {
         'Content-Type': 'application/json',
-        'X-API-KEY': import.meta.env.VITE_API_KEY
+        'X-API-KEY': import.meta.env.VITE_API_KEY,
+        'Bypass-Tunnel-Reminder': 'true'
       }
     })
       .then(res => res.json())
@@ -83,7 +85,8 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/memory?userId=${name}`, {
         headers: {
           'Content-Type': 'application/json',
-          'X-API-KEY': import.meta.env.VITE_API_KEY
+          'X-API-KEY': import.meta.env.VITE_API_KEY,
+          'Bypass-Tunnel-Reminder': 'true'
         }
       });
       if (!res.ok) throw new Error('Not found');

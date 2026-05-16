@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Users, Utensils, Flame, Compass, ShieldCheck, Zap } from 'lucide-react';
 
-const API_BASE = `http://${window.location.hostname}:5001`;
+const API_BASE = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:5001`;
 
 const DIET_COLORS = {
   'Vegetarian': { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200', dot: 'bg-green-500' },
@@ -21,7 +21,8 @@ export default function AgentGrid() {
     fetch(`${API_BASE}/api/users`, {
       headers: {
         'Content-Type': 'application/json',
-        'X-API-KEY': import.meta.env.VITE_API_KEY
+        'X-API-KEY': import.meta.env.VITE_API_KEY,
+        'Bypass-Tunnel-Reminder': 'true'
       }
     })
       .then(res => res.json())

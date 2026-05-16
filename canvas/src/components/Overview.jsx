@@ -21,6 +21,8 @@ const CRAVING_HEX = {
   breakfast: '#3b82f6'
 };
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:5001`;
+
 // Simulated agent thoughts for the Operations Feed
 const AGENT_THOUGHTS = [
   { agent: 'Social Hunter', action: 'EXTRACTION', message: 'Parsed metadata for Chinita (Mexican/Tacos, Indiranagar)', time: 'Just now', color: 'bg-blue-500' },
@@ -45,11 +47,12 @@ export default function Overview({ memory, loading }) {
     setConsensusLoading(true);
     setConsensusResult(null);
     try {
-      const res = await fetch(`http://${window.location.hostname}:5001/api/group-decision`, {
+      const res = await fetch(`${API_BASE}/api/group-decision`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'X-API-KEY': import.meta.env.VITE_API_KEY
+          'X-API-KEY': import.meta.env.VITE_API_KEY,
+          'Bypass-Tunnel-Reminder': 'true'
         },
         body: JSON.stringify({ constraints: {} })
       });
@@ -69,11 +72,12 @@ export default function Overview({ memory, loading }) {
     setHeartbeatLoading(true);
     setHeartbeatResult(null);
     try {
-      const res = await fetch(`http://${window.location.hostname}:5001/api/heartbeat`, { 
+      const res = await fetch(`${API_BASE}/api/heartbeat`, { 
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-KEY': import.meta.env.VITE_API_KEY
+          'X-API-KEY': import.meta.env.VITE_API_KEY,
+          'Bypass-Tunnel-Reminder': 'true'
         }
       });
       const data = await res.json();

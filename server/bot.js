@@ -949,6 +949,8 @@ bot.on('text', async (ctx) => {
                 const entry = response.data.entry || { name: "New Spot", area: "Unknown" };
                 await ctx.reply(`✅ *Saved to Vault!* \n\nName: ${entry.name || 'New Spot'}\nArea: ${entry.area || 'Unknown'}\n\nYour data is secure on your laptop. 🧠`, { parse_mode: 'Markdown' });
                 return; // 🛑 STOP HERE
+            } else {
+                throw new Error("API parsing failed silently");
             }
         } catch (e) {
             // SUPER-BYPASS: If API fails, try to save the name manually from the link
